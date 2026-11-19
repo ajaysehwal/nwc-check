@@ -101,6 +101,39 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 
 Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request.
 
+## Architecture
+
+```
+src/
+├── main.rs        Entry point: runs the stages and sets the exit code
+├── cli.rs         Command-line arguments
+├── ui.rs          Terminal output: progress, sections, problems, summary
+├── lib.rs
+├── wallet.rs      Sends raw NIP-47 requests and decrypts replies
+├── check.rs       Check, Level, Status, Outcome and Summary types
+├── report.rs      JSON report
+└── checks/
+    ├── mod.rs     Context shared by all checks, sections and the runner
+    ├── discovery.rs
+    ├── encryption.rs
+    ├── response.rs
+    ├── errors.rs
+    └── safety.rs
+tests/
+├── support/       Mock wallet service on a local relay
+└── mock_wallet.rs Runs every check against a correct and a buggy mock wallet
+examples/
+└── mock_wallet.rs Runs the mock wallet so the CLI can be tried locally
+```
+
+A run has three stages:
+
+1. **Connect.** `Wallet` connects to the relays in the connection string. It builds every request itself rather than going through an NWC client, so checks can control the encryption tag, signer and expiration of each request.
+2. **Load.** `Context` fetches the wallet's info event and the replies that several checks share, such as `get_info`, once.
+3. **Check.** Each section in `checks/` turns those replies, plus any requests of its own, into an `Outcome` per check. Sections run concurrently and are reported in a fixed order as they finish.
+
+To add a check, declare it with `Check::new` in the module for its section, add it to that module's `CHECKS` list and return its outcome from the module's `run` function. Then add a mock wallet bug that the check must catch.
+
 ## Development
 
 ```sh
