@@ -1,0 +1,13 @@
+[package]
+name = "nwc-check"
+version = "0.1.0"
+edition = "2024"
+description = "Conformance and safety checks for Nostr Wallet Connect (NIP-47) wallet services"
+license = "MIT"
+repository = "https://github.com/ajaysehwal/nwc-check"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4", features = ["derive"] }
+nwc = "0.45"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
