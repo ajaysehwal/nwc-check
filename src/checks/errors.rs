@@ -5,11 +5,24 @@ use super::{Context, describe};
 use crate::check::{Check, Level, Outcome};
 use crate::wallet::{Reply, Request, WalletError};
 
-const NOT_IMPLEMENTED: Check =
-	Check::new("ERR-01", Level::Should, "Unknown method returns NOT_IMPLEMENTED");
-const UNAUTHORIZED: Check =
-	Check::new("ERR-02", Level::Should, "Unknown client returns UNAUTHORIZED");
-const MALFORMED: Check = Check::new("ERR-03", Level::Safety, "Malformed params return an error");
+const NOT_IMPLEMENTED: Check = Check::new(
+	"ERR-01",
+	Level::Should,
+	"Unknown method returns NOT_IMPLEMENTED",
+	"Clients need NOT_IMPLEMENTED to know a feature is missing.",
+);
+const UNAUTHORIZED: Check = Check::new(
+	"ERR-02",
+	Level::Should,
+	"Unknown client returns UNAUTHORIZED",
+	"Requests from keys that aren't connected must be clearly refused.",
+);
+const MALFORMED: Check = Check::new(
+	"ERR-03",
+	Level::Safety,
+	"Malformed params return an error",
+	"Ignoring bad input hides bugs and leaves clients waiting.",
+);
 
 pub const CHECKS: &[&Check] = &[&NOT_IMPLEMENTED, &UNAUTHORIZED, &MALFORMED];
 

@@ -4,11 +4,36 @@ use super::{Context, describe};
 use crate::check::{Check, Level, Outcome};
 use crate::wallet::{Reply, Request};
 
-const RESULT_TYPE: Check = Check::new("RESP-01", Level::Must, "result_type matches the method");
-const NULL_ERROR: Check = Check::new("RESP-02", Level::Must, "Successful reply has a null error");
-const ERROR_SHAPE: Check = Check::new("RESP-03", Level::Must, "Error has a code and a message");
-const TAGS: Check = Check::new("RESP-04", Level::Should, "Reply references the request and client");
-const BALANCE: Check = Check::new("RESP-05", Level::Must, "get_balance returns a balance in msats");
+const RESULT_TYPE: Check = Check::new(
+	"RESP-01",
+	Level::Must,
+	"result_type matches the method",
+	"Clients match a reply to its method by result_type.",
+);
+const NULL_ERROR: Check = Check::new(
+	"RESP-02",
+	Level::Must,
+	"Successful reply has a null error",
+	"A non-null error makes clients treat a success as a failure.",
+);
+const ERROR_SHAPE: Check = Check::new(
+	"RESP-03",
+	Level::Must,
+	"Error has a code and a message",
+	"Clients show the message to users and act on the code.",
+);
+const TAGS: Check = Check::new(
+	"RESP-04",
+	Level::Should,
+	"Reply references the request and client",
+	"Without e and p tags, clients can't match replies to their requests.",
+);
+const BALANCE: Check = Check::new(
+	"RESP-05",
+	Level::Must,
+	"get_balance returns a balance in msats",
+	"Apps show this balance to users.",
+);
 
 pub const CHECKS: &[&Check] = &[&RESULT_TYPE, &NULL_ERROR, &ERROR_SHAPE, &TAGS, &BALANCE];
 
@@ -22,7 +47,7 @@ fn result_type(ctx: &Context) -> Outcome {
 			Some("get_info") => RESULT_TYPE.pass("get_info"),
 			other => RESULT_TYPE.fail(format!("expected get_info, got {other:?}")),
 		},
-		Err(error) => RESULT_TYPE.skip(format!("get_info {error}")),
+		Err(error) => RESULT_TYPE.skip(format!("get_info: {error}")),
 	}
 }
 
@@ -32,13 +57,13 @@ fn null_error(ctx: &Context) -> Outcome {
 			None | Some(Value::Null) => NULL_ERROR.pass("error is null"),
 			Some(error) => NULL_ERROR.fail(format!("error is {error}")),
 		},
-		other => NULL_ERROR.skip(format!("get_info {}", describe(other))),
+		other => NULL_ERROR.skip(format!("get_info: {}", describe(other))),
 	}
 }
 
 fn error_shape(ctx: &Context) -> Outcome {
 	let Ok(reply) = &ctx.unknown_method else {
-		return ERROR_SHAPE.skip(format!("unknown method {}", describe(&ctx.unknown_method)));
+		return ERROR_SHAPE.skip(format!("unknown method: {}", describe(&ctx.unknown_method)));
 	};
 	let Some(error) = reply.error() else {
 		return ERROR_SHAPE.skip("unknown method did not return an error");
@@ -64,7 +89,7 @@ fn tags(ctx: &Context) -> Outcome {
 				},
 			)
 		}
-		Err(error) => TAGS.skip(format!("get_info {error}")),
+		Err(error) => TAGS.skip(format!("get_info: {error}")),
 	}
 }
 

@@ -2,11 +2,30 @@ use super::{Context, describe};
 use crate::check::{Check, Level, Outcome};
 use crate::wallet::{Encryption, Reply, Request, Scheme, WalletError};
 
-const NIP44_REPLY: Check = Check::new("ENC-01", Level::Must, "NIP-44 request gets a NIP-44 reply");
-const NIP04_REPLY: Check = Check::new("ENC-02", Level::Must, "NIP-04 request gets a NIP-04 reply");
-const UNSUPPORTED: Check =
-	Check::new("ENC-03", Level::Must, "Unsupported scheme returns UNSUPPORTED_ENCRYPTION");
-const UNTAGGED: Check = Check::new("ENC-04", Level::Must, "Untagged request is treated as NIP-04");
+const NIP44_REPLY: Check = Check::new(
+	"ENC-01",
+	Level::Must,
+	"NIP-44 request gets a NIP-44 reply",
+	"A client can't read a reply encrypted differently from its request.",
+);
+const NIP04_REPLY: Check = Check::new(
+	"ENC-02",
+	Level::Must,
+	"NIP-04 request gets a NIP-04 reply",
+	"A client can't read a reply encrypted differently from its request.",
+);
+const UNSUPPORTED: Check = Check::new(
+	"ENC-03",
+	Level::Must,
+	"Unsupported scheme returns UNSUPPORTED_ENCRYPTION",
+	"Clients need this error to fall back to a scheme the wallet supports.",
+);
+const UNTAGGED: Check = Check::new(
+	"ENC-04",
+	Level::Must,
+	"Untagged request is treated as NIP-04",
+	"Older clients send no encryption tag and expect a NIP-04 reply.",
+);
 
 pub const CHECKS: &[&Check] = &[&NIP44_REPLY, &NIP04_REPLY, &UNSUPPORTED, &UNTAGGED];
 

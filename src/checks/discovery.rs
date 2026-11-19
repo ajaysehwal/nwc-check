@@ -1,17 +1,46 @@
+use nostr_sdk::prelude::Timestamp;
 use serde_json::Value;
 
 use super::{Context, describe};
 use crate::check::{Check, Level, Outcome};
 use crate::wallet::Scheme;
 
-const INFO_EVENT: Check = Check::new("DISC-01", Level::Must, "Info event is published");
-const METHODS: Check = Check::new("DISC-02", Level::Must, "Info event lists methods");
-const NIP44: Check = Check::new("DISC-03", Level::Should, "NIP-44 encryption is advertised");
-const GET_INFO_METHODS: Check =
-	Check::new("DISC-04", Level::Should, "get_info methods match the info event");
-const NETWORK: Check = Check::new("DISC-05", Level::Must, "get_info reports a valid network");
-const EXTENSIONS: Check =
-	Check::new("DISC-06", Level::Should, "Extensions match between info event and get_info");
+const INFO_EVENT: Check = Check::new(
+	"DISC-01",
+	Level::Must,
+	"Info event is published",
+	"Apps learn what the wallet supports from this event.",
+);
+const METHODS: Check = Check::new(
+	"DISC-02",
+	Level::Must,
+	"Info event lists methods",
+	"Without it, apps can't tell which requests the wallet accepts.",
+);
+const NIP44: Check = Check::new(
+	"DISC-03",
+	Level::Should,
+	"NIP-44 encryption is advertised",
+	"NIP-04 is deprecated; NIP-44 is the encryption clients should use.",
+);
+const GET_INFO_METHODS: Check = Check::new(
+	"DISC-04",
+	Level::Should,
+	"get_info methods match the info event",
+	"Apps may call methods the wallet never advertised.",
+);
+const NETWORK: Check = Check::new(
+	"DISC-05",
+	Level::Must,
+	"get_info reports a valid network",
+	"Apps check the network so they never pay on the wrong chain.",
+);
+const EXTENSIONS: Check = Check::new(
+	"DISC-06",
+	Level::Should,
+	"Extensions match between info event and get_info",
+	"Apps rely on extensions being advertised the same way in both places.",
+);
 
 pub const CHECKS: &[&Check] =
 	&[&INFO_EVENT, &METHODS, &NIP44, &GET_INFO_METHODS, &NETWORK, &EXTENSIONS];
@@ -39,7 +68,7 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 		.unwrap_or_default();
 
 	vec![
-		INFO_EVENT.pass(format!("published at {}", info.created_at)),
+		INFO_EVENT.pass(format!("published {}", age(info.created_at))),
 		METHODS.verdict(!ctx.methods.is_empty(), list_or("methods", &ctx.methods)),
 		NIP44.verdict(ctx.advertises(Scheme::Nip44), list_or("encryption", &ctx.schemes)),
 		get_info_methods(ctx),
@@ -50,7 +79,7 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 
 fn get_info_methods(ctx: &Context) -> Outcome {
 	let Some(result) = ctx.get_info.as_ref().ok().and_then(|reply| reply.result()) else {
-		return GET_INFO_METHODS.skip(format!("get_info {}", describe(&ctx.get_info)));
+		return GET_INFO_METHODS.skip(format!("get_info: {}", describe(&ctx.get_info)));
 	};
 	let methods = strings(result.get("methods"));
 	let unadvertised: Vec<&str> =
@@ -64,7 +93,7 @@ fn get_info_methods(ctx: &Context) -> Outcome {
 
 fn network(ctx: &Context) -> Outcome {
 	let Some(result) = ctx.get_info.as_ref().ok().and_then(|reply| reply.result()) else {
-		return NETWORK.fail(format!("get_info {}", describe(&ctx.get_info)));
+		return NETWORK.fail(format!("get_info: {}", describe(&ctx.get_info)));
 	};
 	let network = result.get("network").and_then(Value::as_str);
 	match (network, ctx.expected_network.as_deref()) {
@@ -109,5 +138,15 @@ fn list_or(label: &str, items: &[impl AsRef<str>]) -> String {
 		format!("no {label}")
 	} else {
 		items.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(", ")
+	}
+}
+
+fn age(created_at: Timestamp) -> String {
+	let secs = Timestamp::now().as_secs().saturating_sub(created_at.as_secs());
+	match secs {
+		0..60 => "just now".to_owned(),
+		60..3_600 => format!("{} min ago", secs / 60),
+		3_600..86_400 => format!("{} h ago", secs / 3_600),
+		_ => format!("{} days ago", secs / 86_400),
 	}
 }

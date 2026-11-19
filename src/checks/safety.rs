@@ -4,7 +4,12 @@ use super::{Context, describe};
 use crate::check::{Check, Level, Outcome};
 use crate::wallet::{Request, WalletError};
 
-const EXPIRED: Check = Check::new("SAFE-01", Level::Safety, "Expired requests are ignored");
+const EXPIRED: Check = Check::new(
+	"SAFE-01",
+	Level::Safety,
+	"Expired requests are ignored",
+	"An expired payment request could be paid long after the user gave up on it.",
+);
 
 pub const CHECKS: &[&Check] = &[&EXPIRED];
 

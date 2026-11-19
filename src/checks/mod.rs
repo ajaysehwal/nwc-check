@@ -4,6 +4,8 @@ mod errors;
 mod response;
 mod safety;
 
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use nostr_sdk::prelude::Event;
 
 use crate::check::{Check, Outcome};
@@ -68,23 +70,76 @@ fn preferred_encryption(schemes: &[String]) -> Encryption {
 	}
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Section {
+	Discovery,
+	Encryption,
+	Responses,
+	Errors,
+	Safety,
+}
+
+impl Section {
+	pub const ALL: [Section; 5] =
+		[Self::Discovery, Self::Encryption, Self::Responses, Self::Errors, Self::Safety];
+
+	pub fn title(self) -> &'static str {
+		match self {
+			Self::Discovery => "Discovery",
+			Self::Encryption => "Encryption",
+			Self::Responses => "Responses",
+			Self::Errors => "Errors",
+			Self::Safety => "Safety",
+		}
+	}
+
+	pub fn checks(self) -> &'static [&'static Check] {
+		match self {
+			Self::Discovery => discovery::CHECKS,
+			Self::Encryption => encryption::CHECKS,
+			Self::Responses => response::CHECKS,
+			Self::Errors => errors::CHECKS,
+			Self::Safety => safety::CHECKS,
+		}
+	}
+
+	async fn run(self, ctx: &Context) -> Vec<Outcome> {
+		match self {
+			Self::Discovery => discovery::run(ctx).await,
+			Self::Encryption => encryption::run(ctx).await,
+			Self::Responses => response::run(ctx).await,
+			Self::Errors => errors::run(ctx).await,
+			Self::Safety => safety::run(ctx).await,
+		}
+	}
+}
+
 pub fn catalog() -> Vec<&'static Check> {
-	[discovery::CHECKS, encryption::CHECKS, response::CHECKS, errors::CHECKS, safety::CHECKS]
-		.into_iter()
-		.flatten()
-		.copied()
-		.collect()
+	Section::ALL.iter().flat_map(|section| section.checks().iter().copied()).collect()
+}
+
+pub async fn run_by_section(ctx: &Context, mut on_section: impl FnMut(Section, Vec<Outcome>)) {
+	let mut pending: FuturesUnordered<_> = Section::ALL
+		.iter()
+		.enumerate()
+		.map(|(index, section)| async move { (index, section.run(ctx).await) })
+		.collect();
+
+	let mut ready: Vec<Option<Vec<Outcome>>> = vec![None; Section::ALL.len()];
+	let mut next = 0;
+	while let Some((index, outcomes)) = pending.next().await {
+		ready[index] = Some(outcomes);
+		while let Some(outcomes) = ready.get_mut(next).and_then(Option::take) {
+			on_section(Section::ALL[next], outcomes);
+			next += 1;
+		}
+	}
 }
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	let (discovery, encryption, response, errors, safety) = tokio::join!(
-		discovery::run(ctx),
-		encryption::run(ctx),
-		response::run(ctx),
-		errors::run(ctx),
-		safety::run(ctx),
-	);
-	[discovery, encryption, response, errors, safety].into_iter().flatten().collect()
+	let mut all = Vec::new();
+	run_by_section(ctx, |_, outcomes| all.extend(outcomes)).await;
+	all
 }
 
 fn describe(reply: &Result<Reply, WalletError>) -> String {

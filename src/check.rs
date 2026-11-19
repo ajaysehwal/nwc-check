@@ -32,11 +32,17 @@ pub struct Check {
 	pub id: &'static str,
 	pub level: Level,
 	pub title: &'static str,
+	pub why: &'static str,
 }
 
 impl Check {
-	pub const fn new(id: &'static str, level: Level, title: &'static str) -> Self {
-		Self { id, level, title }
+	pub const fn new(
+		id: &'static str,
+		level: Level,
+		title: &'static str,
+		why: &'static str,
+	) -> Self {
+		Self { id, level, title, why }
 	}
 
 	pub fn pass(&self, detail: impl Into<String>) -> Outcome {
@@ -57,20 +63,34 @@ impl Check {
 	}
 
 	fn outcome(&self, status: Status, detail: impl Into<String>) -> Outcome {
-		Outcome { id: self.id, level: self.level, title: self.title, status, detail: detail.into() }
+		Outcome {
+			id: self.id,
+			level: self.level,
+			title: self.title,
+			why: self.why,
+			status,
+			detail: detail.into(),
+		}
 	}
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Outcome {
 	pub id: &'static str,
 	pub level: Level,
 	pub title: &'static str,
+	pub why: &'static str,
 	pub status: Status,
 	pub detail: String,
 }
 
-#[derive(Debug, Default, Serialize)]
+impl Outcome {
+	pub fn is_problem(&self) -> bool {
+		matches!(self.status, Status::Fail | Status::Warn)
+	}
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
 pub struct Summary {
 	pub passed: usize,
 	pub warnings: usize,
