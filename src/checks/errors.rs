@@ -1,0 +1,39 @@
+use nostr_sdk::prelude::Keys;
+use serde_json::json;
+
+use super::{Context, describe};
+use crate::check::{Check, Level, Outcome};
+use crate::wallet::{Reply, Request, WalletError};
+
+const NOT_IMPLEMENTED: Check =
+	Check::new("ERR-01", Level::Should, "Unknown method returns NOT_IMPLEMENTED");
+const UNAUTHORIZED: Check =
+	Check::new("ERR-02", Level::Should, "Unknown client returns UNAUTHORIZED");
+const MALFORMED: Check = Check::new("ERR-03", Level::Safety, "Malformed params return an error");
+
+pub const CHECKS: &[&Check] = &[&NOT_IMPLEMENTED, &UNAUTHORIZED, &MALFORMED];
+
+pub async fn run(ctx: &Context) -> Vec<Outcome> {
+	let stranger = Request::new("get_info", ctx.encryption()).signer(Keys::generate());
+	let malformed = Request::new("lookup_invoice", ctx.encryption()).params(json!({}));
+	let (stranger, malformed) = tokio::join!(ctx.wallet.send(stranger), async {
+		if ctx.supports("lookup_invoice") { Some(ctx.wallet.send(malformed).await) } else { None }
+	},);
+
+	vec![
+		expect_code(&NOT_IMPLEMENTED, "NOT_IMPLEMENTED", &ctx.unknown_method),
+		expect_code(&UNAUTHORIZED, "UNAUTHORIZED", &stranger),
+		match malformed {
+			None => MALFORMED.skip("lookup_invoice not advertised"),
+			Some(Ok(reply)) if reply.error().is_some() => MALFORMED.pass(describe(&Ok(reply))),
+			Some(other) => MALFORMED.fail(describe(&other)),
+		},
+	]
+}
+
+fn expect_code(check: &Check, code: &str, reply: &Result<Reply, WalletError>) -> Outcome {
+	match reply {
+		Ok(reply) if reply.error_code() == Some(code) => check.pass(code),
+		other => check.fail(format!("expected {code}, {}", describe(other))),
+	}
+}

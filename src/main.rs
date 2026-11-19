@@ -1,132 +1,74 @@
+mod cli;
+
+use std::io::IsTerminal;
+use std::process::ExitCode;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
-use nwc::prelude::*;
+use anyhow::{Context as _, Result};
+use clap::Parser;
+use nostr::nips::nip47::NostrWalletConnectUri;
+use nwc_check::check::Summary;
+use nwc_check::checks::{self, Context};
+use nwc_check::report::{self, Report};
+use nwc_check::wallet::Wallet;
 
-/// Tests a Nostr Wallet Connect (NIP-47) wallet service.
-#[derive(Parser)]
-#[command(name = "nwc-check", version)]
-struct Cli {
-	#[command(subcommand)]
-	command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-	/// Run the read-only checks against a wallet service.
-	Run {
-		/// The connection string: nostr+walletconnect://...
-		uri: String,
-		/// How long to wait for each answer, in seconds.
-		#[arg(long, default_value_t = 10)]
-		timeout: u64,
-	},
-}
-
-/// The outcome of one check.
-struct CheckResult {
-	id: &'static str,
-	passed: bool,
-	message: String,
-}
-
-impl CheckResult {
-	fn pass(id: &'static str, message: impl Into<String>) -> Self {
-		Self { id, passed: true, message: message.into() }
-	}
-
-	fn fail(id: &'static str, message: impl Into<String>) -> Self {
-		Self { id, passed: false, message: message.into() }
-	}
-}
+use crate::cli::{Cli, Command, Format, RunArgs};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
 	match Cli::parse().command {
-		Command::Run { uri, timeout } => run(&uri, Duration::from_secs(timeout)).await,
-	}
-}
-
-async fn run(uri: &str, timeout: Duration) -> Result<()> {
-	let uri = NostrWalletConnectUri::parse(uri).context("invalid connection string")?;
-	println!("Wallet service: {}", uri.public_key.to_hex());
-
-	let mut results = check_info_event(&uri, timeout).await?;
-	results.push(check_get_info(&uri, timeout).await);
-
-	let passed = results.iter().filter(|r| r.passed).count();
-	for result in &results {
-		let mark = if result.passed { "PASS" } else { "FAIL" };
-		println!("[{mark}] {:<8} {}", result.id, result.message);
-	}
-	println!("{passed}/{} checks passed", results.len());
-
-	if passed < results.len() {
-		std::process::exit(1);
-	}
-	Ok(())
-}
-
-/// DISC-01..03: the wallet service publishes an info event listing its methods and encryption.
-async fn check_info_event(
-	uri: &NostrWalletConnectUri,
-	timeout: Duration,
-) -> Result<Vec<CheckResult>> {
-	let client = Client::default();
-	for relay in &uri.relays {
-		client.add_relay(relay.as_str()).await?;
-	}
-	client.connect().and_wait(timeout).await;
-
-	let filter = Filter::new().kind(Kind::WalletConnectInfo).author(uri.public_key);
-	let events = client.fetch_events(filter).timeout(timeout).await?;
-	client.shutdown().await;
-
-	let Some(info) = events.into_iter().max_by_key(|event| event.created_at) else {
-		return Ok(vec![CheckResult::fail("DISC-01", "no info event (kind 13194) found")]);
-	};
-
-	let mut results = vec![CheckResult::pass("DISC-01", "info event found")];
-
-	let methods: Vec<&str> = info.content.split_whitespace().collect();
-	results.push(if methods.is_empty() {
-		CheckResult::fail("DISC-02", "info event lists no methods")
-	} else {
-		CheckResult::pass("DISC-02", format!("methods: {}", methods.join(", ")))
-	});
-
-	let encryption = info
-		.tags
-		.iter()
-		.find(|tag| tag.kind() == "encryption")
-		.and_then(|tag| tag.content())
-		.map(str::to_owned);
-	results.push(match encryption {
-		Some(schemes) if schemes.split_whitespace().any(|s| s == "nip44_v2") => {
-			CheckResult::pass("DISC-03", format!("encryption: {schemes}"))
+		Command::List => {
+			print!("{}", report::catalog(&checks::catalog()));
+			ExitCode::SUCCESS
 		}
-		Some(schemes) => CheckResult::fail("DISC-03", format!("no nip44_v2 in: {schemes}")),
-		None => CheckResult::fail("DISC-03", "no encryption tag (implies NIP-04 only)"),
-	});
-
-	Ok(results)
+		Command::Run(args) => match run(args).await {
+			Ok(code) => code,
+			Err(error) => {
+				eprintln!("error: {error:#}");
+				ExitCode::from(2)
+			}
+		},
+	}
 }
 
-/// CORE-INFO: `get_info` answers with a valid network.
-async fn check_get_info(uri: &NostrWalletConnectUri, timeout: Duration) -> CheckResult {
-	let nwc = NostrWalletConnect::new(uri.clone());
-	let response = nwc.get_info().timeout(timeout).await;
-	nwc.shutdown().await;
+async fn run(args: RunArgs) -> Result<ExitCode> {
+	let uri = NostrWalletConnectUri::parse(args.uri.trim())
+		.context("invalid connection string, expected nostr+walletconnect://...")?;
+	let wallet = Wallet::connect(uri, Duration::from_secs(args.timeout))
+		.await
+		.context("failed to connect to the wallet's relays")?;
+	let (wallet_key, relays) = (wallet.public_key().to_hex(), wallet.relays());
 
-	match response {
-		Ok(info) => match info.network.as_deref() {
-			Some("mainnet" | "testnet" | "signet" | "regtest") => CheckResult::pass(
-				"INFO-01",
-				format!("get_info: network {}", info.network.unwrap_or_default()),
-			),
-			other => CheckResult::fail("INFO-01", format!("get_info: invalid network {other:?}")),
-		},
-		Err(e) => CheckResult::fail("INFO-01", format!("get_info failed: {e}")),
+	let ctx = Context::load(wallet, args.network.map(|network| network.as_str().to_owned()))
+		.await
+		.context("failed to query the wallet service")?;
+	let mut results = checks::run(&ctx).await;
+	ctx.wallet.disconnect().await;
+
+	if !args.only.is_empty() {
+		results.retain(|result| {
+			args.only.iter().any(|prefix| result.id.starts_with(&prefix.to_uppercase()))
+		});
+	}
+
+	let report = Report::new(wallet_key, relays, results);
+	match args.format {
+		Format::Text => {
+			let no_color =
+				args.no_color || std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+			let color = !no_color && std::io::stdout().is_terminal();
+			print!("{}", report::text(&report, color));
+		}
+		Format::Json => println!("{}", report::json(&report)),
+	}
+
+	Ok(exit_code(&report.summary, args.strict))
+}
+
+fn exit_code(summary: &Summary, strict: bool) -> ExitCode {
+	if summary.failed > 0 || (strict && summary.warnings > 0) {
+		ExitCode::FAILURE
+	} else {
+		ExitCode::SUCCESS
 	}
 }
