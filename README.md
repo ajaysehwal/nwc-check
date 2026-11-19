@@ -36,6 +36,35 @@ nwc-check run
 
 `nwc-check list` prints all checks.
 
+### Output
+
+Progress is shown live while the checks run. Each section is printed as soon as it completes, and every problem is explained at the end:
+
+```
+Responses
+  ✔ RESP-01  result_type matches the method                     get_info
+  ⚠ RESP-04  Reply references the request and client            no p tag for the client
+
+Problems found (1)
+
+  ⚠ RESP-04 Reply references the request and client  SHOULD
+    Found  no p tag for the client
+    Why    Without e and p tags, clients can't match replies to their requests.
+
+⚠ Passed with warnings  15 passed · 1 warning · 0 failed · 3 skipped  (42 ms)
+```
+
+### Try it without a wallet
+
+The repository includes a mock wallet service that runs on a local relay and prints its connection string:
+
+```sh
+cargo run --example mock_wallet            # a wallet that behaves correctly
+cargo run --example mock_wallet -- --buggy # a wallet with deliberate bugs
+```
+
+Then pass the printed connection string to `nwc-check run` in another terminal.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -80,7 +109,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-The tests run every check against a mock wallet service on a local relay, once behaving correctly and once with deliberate bugs that the checks must catch.
+The tests run every check against the mock wallet service (`tests/support`), once behaving correctly and once with deliberate bugs that the checks must catch.
 
 ## License
 
