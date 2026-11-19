@@ -5,15 +5,16 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use clap::Parser;
 use nostr::nips::nip47::NostrWalletConnectUri;
 use nwc_check::check::{Outcome, Summary};
-use nwc_check::checks::{self, Context};
+use nwc_check::checks::{self, Context, Payments};
+use nwc_check::counterparty::{Counterparty, Lnd};
 use nwc_check::report::Report;
 use nwc_check::wallet::Wallet;
 
-use crate::cli::{Cli, Command, Format, RunArgs};
+use crate::cli::{Cli, Command, CounterpartyArgs, Format, RunArgs};
 use crate::ui::Ui;
 
 #[tokio::main]
@@ -58,10 +59,23 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 		.context("failed to connect to the wallet's relays")?;
 	say(&|ui| ui.step(true, format!("Connected to {}", plural(relays.len(), "relay"))));
 
+	let payments = match &args.counterparty.lnd_url {
+		Some(_) => {
+			ui.busy("Connecting to the counterparty node");
+			let (payments, network) = counterparty(&args.counterparty).await?;
+			say(&|ui| ui.step(true, format!("Counterparty LND on {network}")));
+			Some(payments)
+		}
+		None => None,
+	};
+
 	ui.busy("Reading wallet info");
-	let ctx = Context::load(wallet, args.network.map(|network| network.as_str().to_owned()))
+	let mut ctx = Context::load(wallet, args.network.map(|network| network.as_str().to_owned()))
 		.await
 		.context("failed to query the wallet service")?;
+	if let Some(payments) = payments {
+		ctx = ctx.with_payments(payments);
+	}
 	say(&|ui| match &ctx.info {
 		Some(_) => ui.step(
 			true,
@@ -106,6 +120,21 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	}
 
 	Ok(exit_code(&summary, args.strict))
+}
+
+async fn counterparty(args: &CounterpartyArgs) -> Result<(Payments, String)> {
+	let (Some(url), Some(macaroon)) = (&args.lnd_url, &args.lnd_macaroon) else {
+		bail!("--lnd-url needs --lnd-macaroon");
+	};
+	let node = Lnd::new(url, macaroon, args.lnd_cert.as_deref(), Duration::from_secs(60))?;
+	let info = node.info().await.context("failed to reach the counterparty LND node")?;
+	if info.network == "mainnet" && !args.allow_mainnet {
+		bail!(
+			"the counterparty node is on mainnet and payment checks move real funds; pass --allow-mainnet to run them anyway"
+		);
+	}
+	let payments = Payments { node: Box::new(node), amount_msat: args.amount * 1000 };
+	Ok((payments, info.network))
 }
 
 fn selected(only: &[String], id: &str) -> bool {

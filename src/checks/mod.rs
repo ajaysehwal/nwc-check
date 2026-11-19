@@ -1,6 +1,7 @@
 mod discovery;
 mod encryption;
 mod errors;
+mod payments;
 mod response;
 mod safety;
 
@@ -9,9 +10,15 @@ use futures::stream::FuturesUnordered;
 use nostr_sdk::prelude::Event;
 
 use crate::check::{Check, Outcome};
+use crate::counterparty::Counterparty;
 use crate::wallet::{Encryption, Reply, Request, Scheme, Wallet, WalletError};
 
 pub const UNKNOWN_METHOD: &str = "nwc_check_unknown_method";
+
+pub struct Payments {
+	pub node: Box<dyn Counterparty>,
+	pub amount_msat: u64,
+}
 
 pub struct Context {
 	pub wallet: Wallet,
@@ -21,6 +28,7 @@ pub struct Context {
 	pub expected_network: Option<String>,
 	pub get_info: Result<Reply, WalletError>,
 	pub unknown_method: Result<Reply, WalletError>,
+	pub payments: Option<Payments>,
 }
 
 impl Context {
@@ -46,7 +54,21 @@ impl Context {
 			wallet.send(Request::new(UNKNOWN_METHOD, encryption)),
 		);
 
-		Ok(Self { wallet, info, methods, schemes, expected_network, get_info, unknown_method })
+		Ok(Self {
+			wallet,
+			info,
+			methods,
+			schemes,
+			expected_network,
+			get_info,
+			unknown_method,
+			payments: None,
+		})
+	}
+
+	pub fn with_payments(mut self, payments: Payments) -> Self {
+		self.payments = Some(payments);
+		self
 	}
 
 	pub fn supports(&self, method: &str) -> bool {
@@ -77,11 +99,18 @@ pub enum Section {
 	Responses,
 	Errors,
 	Safety,
+	Payments,
 }
 
 impl Section {
-	pub const ALL: [Section; 5] =
-		[Self::Discovery, Self::Encryption, Self::Responses, Self::Errors, Self::Safety];
+	pub const ALL: [Section; 6] = [
+		Self::Discovery,
+		Self::Encryption,
+		Self::Responses,
+		Self::Errors,
+		Self::Safety,
+		Self::Payments,
+	];
 
 	pub fn title(self) -> &'static str {
 		match self {
@@ -90,6 +119,7 @@ impl Section {
 			Self::Responses => "Responses",
 			Self::Errors => "Errors",
 			Self::Safety => "Safety",
+			Self::Payments => "Payments",
 		}
 	}
 
@@ -100,6 +130,7 @@ impl Section {
 			Self::Responses => response::CHECKS,
 			Self::Errors => errors::CHECKS,
 			Self::Safety => safety::CHECKS,
+			Self::Payments => payments::CHECKS,
 		}
 	}
 
@@ -110,6 +141,7 @@ impl Section {
 			Self::Responses => response::run(ctx).await,
 			Self::Errors => errors::run(ctx).await,
 			Self::Safety => safety::run(ctx).await,
+			Self::Payments => payments::run(ctx).await,
 		}
 	}
 }
