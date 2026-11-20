@@ -16,12 +16,19 @@ struct Run {
 	bugs: Bugs,
 	chain: &'static str,
 	counterparty: bool,
+	broke_counterparty: bool,
 	max_sats: u64,
 }
 
 impl Default for Run {
 	fn default() -> Self {
-		Self { bugs: Bugs::default(), chain: "regtest", counterparty: true, max_sats: 100 }
+		Self {
+			bugs: Bugs::default(),
+			chain: "regtest",
+			counterparty: true,
+			broke_counterparty: false,
+			max_sats: 100,
+		}
 	}
 }
 
@@ -33,7 +40,10 @@ impl Run {
 		let wallet = Wallet::connect(uri, Duration::from_secs(3)).await.unwrap();
 		let mut ctx = Context::load(wallet, Some(self.chain.to_owned())).await.unwrap();
 		if self.counterparty {
-			let node = Box::new(MockCounterparty(network.clone()));
+			let node = Box::new(MockCounterparty {
+				network: network.clone(),
+				broke: self.broke_counterparty,
+			});
 			let payments = Payments::new(node, self.chain.to_owned(), 10_000, self.max_sats * 1000);
 			ctx = ctx.with_payments(payments);
 		}
@@ -80,6 +90,15 @@ async fn payments_stop_at_max_sats() {
 	let over_budget = outcomes.iter().filter(|outcome| outcome.detail.contains("--max-sats"));
 	assert!(over_budget.count() >= 2);
 	assert_eq!(network.moved_msat(), 10_000);
+}
+
+#[tokio::test]
+async fn counterparty_without_funds_isnt_blamed_on_the_wallet() {
+	let (outcomes, _) = Run { broke_counterparty: true, ..Run::default() }.checks().await;
+	let problems: Vec<&Outcome> = outcomes.iter().filter(|outcome| outcome.is_problem()).collect();
+	assert!(problems.is_empty(), "{problems:#?}");
+	assert_eq!(status(&outcomes, "PAY-01"), Status::Skip);
+	assert_eq!(status(&outcomes, "PAY-02"), Status::Pass);
 }
 
 #[tokio::test]
