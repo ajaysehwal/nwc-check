@@ -4,7 +4,7 @@ Conformance and safety checks for [Nostr Wallet Connect](https://github.com/nost
 
 `nwc-check` connects to a wallet service the way an app would, sends it real NIP-47 requests, including malformed and adversarial ones, and reports whether it follows the spec and handles requests safely.
 
-All current checks are read-only and never spend funds.
+By default every check is read-only and never moves funds. Payment checks only run when you give it a counterparty node.
 
 ## Install
 
@@ -35,6 +35,27 @@ nwc-check run
 | `--no-color` | Disable colored output (`NO_COLOR` is also respected) |
 
 `nwc-check list` prints all checks.
+
+### Payment checks
+
+Payment checks need a second node you control, the counterparty. It pays an invoice from `make_invoice` and creates an invoice for the wallet to pay with `pay_invoice`. Only LND is supported for now.
+
+```sh
+nwc-check run \
+  --lnd-url https://localhost:8080 \
+  --lnd-macaroon ~/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+  --lnd-cert ~/.lnd/tls.cert
+```
+
+The counterparty needs a route to the wallet, for example a channel on regtest or signet. Each payment is 10 sats by default (`--amount`). If the counterparty is on mainnet, the run stops unless you pass `--allow-mainnet`.
+
+| Option | Description |
+|---|---|
+| `--lnd-url <URL>` | LND REST URL |
+| `--lnd-macaroon <PATH>` | Macaroon with info:read, invoices:write and offchain:write, e.g. `admin.macaroon` |
+| `--lnd-cert <PATH>` | TLS certificate, for nodes with a self-signed cert |
+| `--amount <SATS>` | Amount of each test payment (default 10) |
+| `--allow-mainnet` | Allow payment checks against a mainnet counterparty |
 
 ### Output
 
@@ -98,8 +119,11 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 | ERR-02 | SHOULD | Unknown client returns UNAUTHORIZED |
 | ERR-03 | SAFETY | Malformed params return an error |
 | SAFE-01 | SAFETY | Expired requests are ignored |
+| PAY-01 | MUST | make_invoice returns a payable invoice |
+| PAY-02 | MUST | pay_invoice delivers the payment |
+| PAY-03 | SAFETY | pay_invoice returns the matching preimage |
 
-Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request.
+Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks are skipped without a counterparty.
 
 ## Architecture
 
@@ -112,15 +136,17 @@ src/
 ├── wallet.rs      Sends raw NIP-47 requests and decrypts replies
 ├── check.rs       Check, Level, Status, Outcome and Summary types
 ├── report.rs      JSON report
+├── counterparty/  Node that pays and gets paid by the wallet (Counterparty trait, LND client)
 └── checks/
     ├── mod.rs     Context shared by all checks, sections and the runner
     ├── discovery.rs
     ├── encryption.rs
     ├── response.rs
     ├── errors.rs
-    └── safety.rs
+    ├── safety.rs
+    └── payments.rs
 tests/
-├── support/       Mock wallet service on a local relay
+├── support/       Mock wallet service and counterparty on a local relay
 └── mock_wallet.rs Runs every check against a correct and a buggy mock wallet
 examples/
 └── mock_wallet.rs Runs the mock wallet so the CLI can be tried locally

@@ -1,21 +1,27 @@
 #[path = "../tests/support/mod.rs"]
+#[allow(dead_code)]
 mod support;
 
 use nostr_sdk::prelude::MockRelay;
 
-use crate::support::{Bugs, MockWallet};
+use crate::support::{Bugs, MockNetwork, MockWallet};
 
 #[tokio::main]
 async fn main() {
 	let buggy = std::env::args().any(|arg| arg == "--buggy");
 	let bugs = if buggy {
-		Bugs { answer_expired: true, wrong_error_code: true, skip_p_tag: true }
+		Bugs {
+			answer_expired: true,
+			wrong_error_code: true,
+			skip_p_tag: true,
+			wrong_preimage: true,
+		}
 	} else {
 		Bugs::default()
 	};
 
 	let relay = MockRelay::run().await.expect("failed to start the local relay");
-	let uri = MockWallet::start(&relay, bugs).await;
+	let uri = MockWallet::start(&relay, bugs, MockNetwork::default()).await;
 	println!("{uri}");
 	eprintln!(
 		"Mock wallet running{}. Press Ctrl-C to stop.",

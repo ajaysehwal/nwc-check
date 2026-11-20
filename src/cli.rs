@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
@@ -48,6 +50,34 @@ pub struct RunArgs {
 	/// Disable colored output
 	#[arg(long)]
 	pub no_color: bool,
+
+	#[command(flatten)]
+	pub counterparty: CounterpartyArgs,
+}
+
+/// A node you control that pays and gets paid by the wallet. Payment checks are skipped without one.
+#[derive(clap::Args)]
+#[command(next_help_heading = "Payment checks")]
+pub struct CounterpartyArgs {
+	/// LND REST URL of the counterparty node, e.g. https://localhost:8080
+	#[arg(long, value_name = "URL", requires = "lnd_macaroon")]
+	pub lnd_url: Option<String>,
+
+	/// LND macaroon file (admin.macaroon, or one that can create invoices and send payments)
+	#[arg(long, value_name = "PATH")]
+	pub lnd_macaroon: Option<PathBuf>,
+
+	/// LND TLS certificate, for nodes with a self-signed cert
+	#[arg(long, value_name = "PATH")]
+	pub lnd_cert: Option<PathBuf>,
+
+	/// Amount for each test payment
+	#[arg(long, default_value_t = 10, value_name = "SATS")]
+	pub amount: u64,
+
+	/// Allow payment checks when the counterparty is on mainnet
+	#[arg(long)]
+	pub allow_mainnet: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
