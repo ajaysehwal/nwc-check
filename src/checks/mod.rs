@@ -36,12 +36,13 @@ impl Payments {
 		Self { node, network, amount_msat, remaining_msat: Mutex::new(max_msat) }
 	}
 
-	pub fn reserve(&self) -> Result<(), String> {
+	pub fn reserve(&self, payments: u64) -> Result<(), String> {
+		let needed = self.amount_msat * payments;
 		let mut remaining = self.remaining_msat.lock().unwrap_or_else(|e| e.into_inner());
-		if *remaining < self.amount_msat {
+		if *remaining < needed {
 			return Err(format!("would go over --max-sats ({} sats left)", *remaining / 1000));
 		}
-		*remaining -= self.amount_msat;
+		*remaining -= needed;
 		Ok(())
 	}
 }
@@ -221,6 +222,14 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 	let mut all = Vec::new();
 	run_by_section(ctx, |_, outcomes| all.extend(outcomes)).await;
 	all
+}
+
+fn state(result: &serde_json::Value) -> &str {
+	match result.get("state").and_then(serde_json::Value::as_str) {
+		Some(state) => state,
+		None if result.get("settled_at").is_some_and(|at| !at.is_null()) => "settled",
+		None => "pending",
+	}
 }
 
 fn describe(reply: &Result<Reply, WalletError>) -> String {
