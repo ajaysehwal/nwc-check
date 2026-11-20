@@ -4,6 +4,7 @@ mod encryption;
 mod errors;
 mod invoices;
 mod ledger;
+mod nwc13;
 mod payments;
 mod response;
 mod safety;
@@ -177,12 +178,13 @@ pub enum Section {
 	Safety,
 	Invoices,
 	Payments,
+	Nwc13,
 	Ledger,
 	Budget,
 }
 
 impl Section {
-	pub const ALL: [Section; 9] = [
+	pub const ALL: [Section; 10] = [
 		Self::Discovery,
 		Self::Encryption,
 		Self::Responses,
@@ -190,6 +192,7 @@ impl Section {
 		Self::Safety,
 		Self::Invoices,
 		Self::Payments,
+		Self::Nwc13,
 		Self::Ledger,
 		Self::Budget,
 	];
@@ -203,6 +206,7 @@ impl Section {
 			Self::Safety => "Safety",
 			Self::Invoices => "Invoices",
 			Self::Payments => "Payments",
+			Self::Nwc13 => "Connection budget (NWC-13)",
 			Self::Ledger => "Ledger",
 			Self::Budget => "Budget",
 		}
@@ -217,6 +221,7 @@ impl Section {
 			Self::Safety => safety::CHECKS,
 			Self::Invoices => invoices::CHECKS,
 			Self::Payments => payments::CHECKS,
+			Self::Nwc13 => nwc13::CHECKS,
 			Self::Ledger => ledger::CHECKS,
 			Self::Budget => budget::CHECKS,
 		}
@@ -231,6 +236,7 @@ impl Section {
 			Self::Safety => safety::run(ctx).await,
 			Self::Invoices => invoices::run(ctx).await,
 			Self::Payments => payments::run(ctx).await,
+			Self::Nwc13 => nwc13::run(ctx).await,
 			Self::Ledger => ledger::run(ctx).await,
 			Self::Budget => budget::run(ctx).await,
 		}

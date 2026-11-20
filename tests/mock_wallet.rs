@@ -9,11 +9,12 @@ use nwc_check::wallet::Wallet;
 
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
-const PAYMENT_CHECKS: [&str; 10] = [
+const PAYMENT_CHECKS: [&str; 11] = [
 	"PAY-01", "PAY-02", "PAY-03", "CORE-04", "CORE-07", "CORE-08", "CORE-09", "SAFE-02", "SAFE-03",
-	"SAFE-05",
+	"SAFE-05", "EXT13-04",
 ];
 const INVOICE_CHECKS: [&str; 5] = ["CORE-01", "CORE-02", "CORE-03", "CORE-04", "CORE-05"];
+const NWC13_CHECKS: [&str; 3] = ["EXT13-01", "EXT13-02", "EXT13-03"];
 
 struct Run {
 	bugs: Bugs,
@@ -71,7 +72,7 @@ async fn compliant_wallet_has_no_failures() {
 	let problems: Vec<&Outcome> = outcomes.iter().filter(|outcome| outcome.is_problem()).collect();
 	assert!(problems.is_empty(), "{problems:#?}");
 	assert_eq!(outcomes.len(), checks::catalog().len());
-	for id in PAYMENT_CHECKS.iter().chain(&INVOICE_CHECKS) {
+	for id in PAYMENT_CHECKS.iter().chain(&INVOICE_CHECKS).chain(&NWC13_CHECKS) {
 		assert_eq!(status(&outcomes, id), Status::Pass, "{id}");
 	}
 }
@@ -138,6 +139,10 @@ async fn each_bug_is_caught_on_its_own() {
 		("CORE-08", Bugs { ignores_amount: true, ..none }),
 		("CORE-09", Bugs { hidden_fee: true, ..none }),
 		("SAFE-05", Bugs { ignores_permissions: true, ..none }),
+		("EXT13-01", Bugs { budget_missing_from_get_info: true, ..none }),
+		("EXT13-02", Bugs { budget_without_total: true, ..none }),
+		("EXT13-03", Bugs { renews_at_missing: true, ..none }),
+		("EXT13-04", Bugs { budget_ignores_fees: true, ..none }),
 	];
 	for (id, bugs) in cases {
 		let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;

@@ -162,6 +162,10 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 | SAFE-03 | SAFETY | A duplicated pay_invoice is paid once |
 | SAFE-02 | SAFETY | Concurrent payments stay within the budget |
 | SAFE-05 | SAFETY | A read-only connection can't pay |
+| EXT13-01 | MUST | get_budget is listed in the info event and get_info |
+| EXT13-02 | MUST | get_budget is empty or has every required field |
+| EXT13-03 | MUST | A renewing budget has renews_at, a never budget doesn't |
+| EXT13-04 | SAFETY | used_budget rises by the amount plus fees_paid |
 | CORE-01 | MUST | make_invoice matches amount, description and expiry |
 | CORE-02 | MUST | make_invoice sets the description_hash |
 | CORE-03 | MUST | lookup_invoice finds by payment_hash and invoice |
@@ -174,11 +178,11 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 | CORE-08 | MUST | pay_invoice pays the amount given for an amountless invoice |
 | CORE-09 | SAFETY | Balance drops by the amount plus fees_paid |
 
-Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks, CORE-04, CORE-07 to CORE-09, SAFE-02 and SAFE-03, which move funds, are skipped without a counterparty and `--allow-spend`, and on mainnet. Invoice checks decode the returned BOLT11 invoice rather than trusting the reply's fields.
+Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks, CORE-04, CORE-07 to CORE-09, SAFE-02, SAFE-03, SAFE-05 and EXT13-04, which move funds, are skipped without a counterparty and `--allow-spend`, and on mainnet. Invoice checks decode the returned BOLT11 invoice rather than trusting the reply's fields.
 
 SAFE-03 sends one signed `pay_invoice` event, then publishes the identical event again after the wallet replies, and counts settled payments for that hash with `list_transactions`. It reserves twice the payment amount from `--max-sats`, since a wallet with this bug pays twice. It's skipped when the relays don't pass the copy on.
 
-CORE-09 compares `get_balance` before and after one payment. It allows up to 1 sat of difference for wallets that round to whole sats. Payment checks are skipped, not failed, when the wallet refuses with `QUOTA_EXCEEDED`, since that means the connection's budget ran out.
+CORE-09 and EXT13-04 share one payment: CORE-09 compares `get_balance`, and EXT13-04 compares `used_budget` from [NWC-13](https://github.com/nostr-wallet-connect/nwc/blob/main/13.md) `get_budget`, before and after it. EXT13 checks are skipped when the wallet doesn't advertise `get_budget`. It allows up to 1 sat of difference for wallets that round to whole sats. Payment checks are skipped, not failed, when the wallet refuses with `QUOTA_EXCEEDED`, since that means the connection's budget ran out.
 
 SAFE-05 needs a second connection to the same wallet that doesn't have `pay_invoice` permission. Pass it with `--readonly-uri` or `NWC_READONLY_URI`; like the main connection string, it's never read from the settings file. The read-only connection tries to pay a counterparty invoice, and the check passes only if the wallet replies `RESTRICTED` and nothing arrives.
 
@@ -207,6 +211,7 @@ src/
     ├── safety.rs
     ├── invoices.rs
     ├── payments.rs
+    ├── nwc13.rs       NWC-13 get_budget
     ├── ledger.rs      Runs on its own after the others, since it compares balances
     └── budget.rs      Runs last, since it uses up the connection's budget
 tests/

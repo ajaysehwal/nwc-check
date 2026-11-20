@@ -50,6 +50,10 @@ pub struct Bugs {
 	pub ignores_amount: bool,
 	pub hidden_fee: bool,
 	pub ignores_permissions: bool,
+	pub budget_missing_from_get_info: bool,
+	pub budget_without_total: bool,
+	pub renews_at_missing: bool,
+	pub budget_ignores_fees: bool,
 }
 
 impl Bugs {
@@ -70,6 +74,10 @@ impl Bugs {
 			ignores_amount: true,
 			hidden_fee: true,
 			ignores_permissions: true,
+			budget_missing_from_get_info: true,
+			budget_without_total: true,
+			renews_at_missing: true,
+			budget_ignores_fees: true,
 		}
 	}
 }
@@ -347,7 +355,11 @@ impl MockWallet {
 		let outcome = match method.as_str() {
 			"pay_invoice" if readonly && !self.bugs.ignores_permissions => error("RESTRICTED"),
 			"get_info" => {
-				Ok(json!({ "alias": "mock", "network": self.network.chain, "methods": METHODS }))
+				let methods: Vec<&str> = METHODS
+					.into_iter()
+					.filter(|m| *m != "get_budget" || !self.bugs.budget_missing_from_get_info)
+					.collect();
+				Ok(json!({ "alias": "mock", "network": self.network.chain, "methods": methods }))
 			}
 			"get_balance" => Ok(json!({ "balance": *self.balance_msat.lock().unwrap() })),
 			"make_invoice" => Ok(self.make_invoice(&body["params"])),
@@ -449,7 +461,19 @@ impl MockWallet {
 		match &self.budget {
 			Some(budget) => {
 				let budget = budget.lock().unwrap();
-				json!({ "total_budget": budget.total_msat, "used_budget": budget.used_msat })
+				let mut result = json!({
+					"used_budget": budget.used_msat,
+					"total_budget": budget.total_msat,
+					"renewal_period": "monthly",
+					"renews_at": Timestamp::now().as_secs() + 30 * 24 * 3600,
+				});
+				if self.bugs.budget_without_total {
+					result.as_object_mut().unwrap().remove("total_budget");
+				}
+				if self.bugs.renews_at_missing {
+					result.as_object_mut().unwrap().remove("renews_at");
+				}
+				result
 			}
 			None => json!({}),
 		}
@@ -482,7 +506,8 @@ impl MockWallet {
 			0 => params["amount"].as_u64().ok_or_else(failed)?,
 			amount_msat => amount_msat,
 		};
-		self.charge(amount_msat + FEE_MSAT).await?;
+		let fee = if self.bugs.budget_ignores_fees { 0 } else { FEE_MSAT };
+		self.charge(amount_msat + fee).await?;
 		let preimage = self
 			.network
 			.pay(bolt11, self.bugs.pays_duplicates, Some(amount_msat))
