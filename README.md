@@ -4,7 +4,7 @@ Conformance and safety checks for [Nostr Wallet Connect](https://github.com/nost
 
 `nwc-check` connects to a wallet service the way an app would, sends it real NIP-47 requests, including malformed and adversarial ones, and reports whether it follows the spec and handles requests safely.
 
-By default every check is read-only and never moves funds. Payment checks only run when you give it a counterparty node.
+By default every check is read-only and never moves funds. Payment checks only run with a counterparty node and `--allow-spend`, and never on mainnet.
 
 ## Install
 
@@ -41,21 +41,28 @@ nwc-check run
 Payment checks need a second node you control, the counterparty. It pays an invoice from `make_invoice` and creates an invoice for the wallet to pay with `pay_invoice`. Only LND is supported for now.
 
 ```sh
-nwc-check run \
+nwc-check run --allow-spend \
   --lnd-url https://localhost:8080 \
   --lnd-macaroon ~/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   --lnd-cert ~/.lnd/tls.cert
 ```
 
-The counterparty needs a route to the wallet, for example a channel on regtest or signet. Each payment is 10 sats by default (`--amount`). If the counterparty is on mainnet, the run stops unless you pass `--allow-mainnet`.
+The counterparty needs a route to the wallet, for example a channel on regtest or signet.
+
+Spending is guarded:
+
+- Without `--allow-spend`, no request that can move funds is sent, and the counterparty isn't contacted.
+- If the wallet or the counterparty is on mainnet, or they're on different networks, payment checks are skipped. There is no override.
+- Each payment is 10 sats by default (`--amount`), and all payments in a run together never move more than `--max-sats` (default 100). A payment that would go over is skipped.
 
 | Option | Description |
 |---|---|
 | `--lnd-url <URL>` | LND REST URL |
 | `--lnd-macaroon <PATH>` | Macaroon with info:read, invoices:write and offchain:write, e.g. `admin.macaroon` |
 | `--lnd-cert <PATH>` | TLS certificate, for nodes with a self-signed cert |
+| `--allow-spend` | Allow checks that move funds |
 | `--amount <SATS>` | Amount of each test payment (default 10) |
-| `--allow-mainnet` | Allow payment checks against a mainnet counterparty |
+| `--max-sats <SATS>` | Most sats a run may move in total (default 100) |
 
 ### Output
 
@@ -123,7 +130,7 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 | PAY-02 | MUST | pay_invoice delivers the payment |
 | PAY-03 | SAFETY | pay_invoice returns the matching preimage |
 
-Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks are skipped without a counterparty.
+Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks are skipped without a counterparty and `--allow-spend`, and on mainnet.
 
 ## Architecture
 

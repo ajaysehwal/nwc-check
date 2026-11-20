@@ -71,13 +71,17 @@ pub struct CounterpartyArgs {
 	#[arg(long, value_name = "PATH")]
 	pub lnd_cert: Option<PathBuf>,
 
+	/// Allow checks that move funds. They never run on mainnet
+	#[arg(long)]
+	pub allow_spend: bool,
+
 	/// Amount for each test payment
 	#[arg(long, default_value_t = 10, value_name = "SATS")]
 	pub amount: u64,
 
-	/// Allow payment checks when the counterparty is on mainnet
-	#[arg(long)]
-	pub allow_mainnet: bool,
+	/// Most sats all payments in a run may move together
+	#[arg(long, default_value_t = 100, value_name = "SATS")]
+	pub max_sats: u64,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

@@ -29,11 +29,9 @@ const PREIMAGE: Check = Check::new(
 pub const CHECKS: &[&Check] = &[&RECEIVE, &SEND, &PREIMAGE];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	let Some(payments) = &ctx.payments else {
-		return CHECKS
-			.iter()
-			.map(|check| check.skip("no counterparty node (see --lnd-url)"))
-			.collect();
+	let payments = match &ctx.payments {
+		Ok(payments) => payments,
+		Err(reason) => return CHECKS.iter().map(|check| check.skip(reason)).collect(),
 	};
 	let mut outcomes = vec![receive(ctx, payments).await];
 	outcomes.extend(send(ctx, payments).await);
@@ -56,6 +54,9 @@ async fn receive(ctx: &Context, payments: &Payments) -> Outcome {
 	let Some(invoice) = invoice else {
 		return RECEIVE.fail("reply has no invoice");
 	};
+	if let Err(reason) = payments.reserve() {
+		return RECEIVE.skip(reason);
+	}
 	match payments.node.pay(invoice).await {
 		Ok(()) => RECEIVE.pass(format!("counterparty paid {}", sats(payments.amount_msat))),
 		Err(error) => RECEIVE.fail(format!("counterparty couldn't pay it: {error:#}")),
@@ -77,6 +78,9 @@ async fn send(ctx: &Context, payments: &Payments) -> [Outcome; 2] {
 		}
 	};
 
+	if let Err(reason) = payments.reserve() {
+		return [SEND.skip(&reason), PREIMAGE.skip(reason)];
+	}
 	let params = json!({ "invoice": invoice.bolt11 });
 	let reply = ctx.wallet.send(Request::new("pay_invoice", ctx.encryption()).params(params)).await;
 	let sent = match payments.node.is_settled(&invoice.payment_hash).await {

@@ -9,17 +9,35 @@ use nwc_check::wallet::Wallet;
 
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
-async fn run_checks(bugs: Bugs, with_counterparty: bool) -> Vec<Outcome> {
-	let relay = MockRelay::run().await.unwrap();
-	let network = MockNetwork::default();
-	let uri = MockWallet::start(&relay, bugs, network.clone()).await;
-	let wallet = Wallet::connect(uri, Duration::from_secs(3)).await.unwrap();
-	let mut ctx = Context::load(wallet, Some("regtest".to_owned())).await.unwrap();
-	if with_counterparty {
-		let node = Box::new(MockCounterparty(network));
-		ctx = ctx.with_payments(Payments { node, amount_msat: 10_000 });
+const PAYMENT_CHECKS: [&str; 3] = ["PAY-01", "PAY-02", "PAY-03"];
+
+struct Run {
+	bugs: Bugs,
+	chain: &'static str,
+	counterparty: bool,
+	max_sats: u64,
+}
+
+impl Default for Run {
+	fn default() -> Self {
+		Self { bugs: Bugs::default(), chain: "regtest", counterparty: true, max_sats: 100 }
 	}
-	checks::run(&ctx).await
+}
+
+impl Run {
+	async fn checks(self) -> (Vec<Outcome>, MockNetwork) {
+		let relay = MockRelay::run().await.unwrap();
+		let network = MockNetwork::new(self.chain);
+		let uri = MockWallet::start(&relay, self.bugs, network.clone()).await;
+		let wallet = Wallet::connect(uri, Duration::from_secs(3)).await.unwrap();
+		let mut ctx = Context::load(wallet, Some(self.chain.to_owned())).await.unwrap();
+		if self.counterparty {
+			let node = Box::new(MockCounterparty(network.clone()));
+			let payments = Payments::new(node, self.chain.to_owned(), 10_000, self.max_sats * 1000);
+			ctx = ctx.with_payments(payments);
+		}
+		(checks::run(&ctx).await, network)
+	}
 }
 
 fn status(outcomes: &[Outcome], id: &str) -> Status {
@@ -28,24 +46,39 @@ fn status(outcomes: &[Outcome], id: &str) -> Status {
 
 #[tokio::test]
 async fn compliant_wallet_has_no_failures() {
-	let outcomes = run_checks(Bugs::default(), true).await;
-	let problems: Vec<&Outcome> = outcomes
-		.iter()
-		.filter(|outcome| matches!(outcome.status, Status::Fail | Status::Warn))
-		.collect();
+	let (outcomes, _) = Run::default().checks().await;
+	let problems: Vec<&Outcome> = outcomes.iter().filter(|outcome| outcome.is_problem()).collect();
 	assert!(problems.is_empty(), "{problems:#?}");
 	assert_eq!(outcomes.len(), checks::catalog().len());
-	for id in ["PAY-01", "PAY-02", "PAY-03"] {
+	for id in PAYMENT_CHECKS {
 		assert_eq!(status(&outcomes, id), Status::Pass, "{id}");
 	}
 }
 
 #[tokio::test]
 async fn payment_checks_skip_without_counterparty() {
-	let outcomes = run_checks(Bugs::default(), false).await;
-	for id in ["PAY-01", "PAY-02", "PAY-03"] {
+	let (outcomes, network) = Run { counterparty: false, ..Run::default() }.checks().await;
+	for id in PAYMENT_CHECKS {
 		assert_eq!(status(&outcomes, id), Status::Skip, "{id}");
 	}
+	assert_eq!(network.moved_msat(), 0);
+}
+
+#[tokio::test]
+async fn mainnet_wallet_spends_nothing() {
+	let (outcomes, network) = Run { chain: "mainnet", ..Run::default() }.checks().await;
+	for id in PAYMENT_CHECKS {
+		assert_eq!(status(&outcomes, id), Status::Skip, "{id}");
+	}
+	assert_eq!(network.moved_msat(), 0);
+}
+
+#[tokio::test]
+async fn payments_stop_at_max_sats() {
+	let (outcomes, network) = Run { max_sats: 15, ..Run::default() }.checks().await;
+	assert_eq!(status(&outcomes, "PAY-01"), Status::Pass);
+	assert_eq!(status(&outcomes, "PAY-02"), Status::Skip);
+	assert!(network.moved_msat() <= 15_000);
 }
 
 #[tokio::test]
@@ -56,7 +89,7 @@ async fn buggy_wallet_is_caught() {
 		skip_p_tag: true,
 		wrong_preimage: true,
 	};
-	let outcomes = run_checks(bugs, true).await;
+	let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;
 	assert_eq!(status(&outcomes, "ERR-01"), Status::Warn);
 	assert_eq!(status(&outcomes, "RESP-04"), Status::Warn);
 	assert!(matches!(status(&outcomes, "SAFE-01"), Status::Fail | Status::Skip));

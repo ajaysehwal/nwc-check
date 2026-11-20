@@ -25,23 +25,43 @@ pub struct Bugs {
 	pub wrong_preimage: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MockNetwork {
+	chain: &'static str,
 	invoices: Arc<Mutex<HashMap<String, MockInvoice>>>,
 }
 
 #[derive(Clone, Copy)]
 struct MockInvoice {
 	preimage: [u8; 32],
+	amount_msat: u64,
 	paid: bool,
 }
 
+impl Default for MockNetwork {
+	fn default() -> Self {
+		Self::new("regtest")
+	}
+}
+
 impl MockNetwork {
-	fn create(&self) -> Invoice {
+	pub fn new(chain: &'static str) -> Self {
+		Self { chain, invoices: Arc::default() }
+	}
+
+	pub fn moved_msat(&self) -> u64 {
+		let invoices = self.invoices.lock().unwrap();
+		invoices.values().filter(|invoice| invoice.paid).map(|invoice| invoice.amount_msat).sum()
+	}
+
+	fn create(&self, amount_msat: u64) -> Invoice {
 		let preimage = Keys::generate().secret_key().to_secret_bytes();
 		let payment_hash = payment_hash(&preimage);
 		let bolt11 = format!("lnmock{}", to_hex(&payment_hash));
-		self.invoices.lock().unwrap().insert(bolt11.clone(), MockInvoice { preimage, paid: false });
+		self.invoices
+			.lock()
+			.unwrap()
+			.insert(bolt11.clone(), MockInvoice { preimage, amount_msat, paid: false });
 		Invoice { bolt11, payment_hash }
 	}
 
@@ -65,11 +85,16 @@ pub struct MockCounterparty(pub MockNetwork);
 
 impl Counterparty for MockCounterparty {
 	fn info(&self) -> BoxFuture<'_, Result<NodeInfo>> {
-		async { Ok(NodeInfo { pubkey: "mock".to_owned(), network: "regtest".to_owned() }) }.boxed()
+		let network = self.0.chain.to_owned();
+		async { Ok(NodeInfo { pubkey: "mock".to_owned(), network }) }.boxed()
 	}
 
-	fn create_invoice<'a>(&'a self, _: u64, _: &'a str) -> BoxFuture<'a, Result<Invoice>> {
-		async { Ok(self.0.create()) }.boxed()
+	fn create_invoice<'a>(
+		&'a self,
+		amount_msat: u64,
+		_: &'a str,
+	) -> BoxFuture<'a, Result<Invoice>> {
+		async move { Ok(self.0.create(amount_msat)) }.boxed()
 	}
 
 	fn is_settled<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<bool>> {
@@ -159,10 +184,12 @@ impl MockWallet {
 		let method = body["method"].as_str().unwrap_or_default().to_owned();
 
 		let outcome = match method.as_str() {
-			"get_info" => Ok(json!({ "alias": "mock", "network": "regtest", "methods": METHODS })),
+			"get_info" => {
+				Ok(json!({ "alias": "mock", "network": self.network.chain, "methods": METHODS }))
+			}
 			"get_balance" => Ok(json!({ "balance": 21_000 })),
 			"make_invoice" => {
-				let invoice = self.network.create();
+				let invoice = self.network.create(body["params"]["amount"].as_u64().unwrap_or(0));
 				Ok(
 					json!({ "invoice": invoice.bolt11, "payment_hash": to_hex(&invoice.payment_hash) }),
 				)
