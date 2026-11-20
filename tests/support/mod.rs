@@ -16,7 +16,9 @@ use nostr_sdk::prelude::{
 	Client, ClientNotification, Event, EventBuilder, Filter, FinalizeEvent, Keys, Kind, MockRelay,
 	StreamExt, Tag, Timestamp,
 };
-use nwc_check::counterparty::{Counterparty, Invoice, NodeInfo, from_hex, sha256, to_hex};
+use nwc_check::counterparty::{
+	Counterparty, Invoice, NodeInfo, PayError, from_hex, sha256, to_hex,
+};
 use serde_json::{Value, json};
 
 const METHODS: [&str; 5] =
@@ -141,11 +143,14 @@ fn random_bytes() -> [u8; 32] {
 	Keys::generate().secret_key().to_secret_bytes()
 }
 
-pub struct MockCounterparty(pub MockNetwork);
+pub struct MockCounterparty {
+	pub network: MockNetwork,
+	pub broke: bool,
+}
 
 impl Counterparty for MockCounterparty {
 	fn info(&self) -> BoxFuture<'_, Result<NodeInfo>> {
-		let network = self.0.chain.to_owned();
+		let network = self.network.chain.to_owned();
 		async { Ok(NodeInfo { pubkey: "mock".to_owned(), network }) }.boxed()
 	}
 
@@ -154,18 +159,29 @@ impl Counterparty for MockCounterparty {
 		amount_msat: u64,
 		memo: &'a str,
 	) -> BoxFuture<'a, Result<Invoice>> {
-		let invoice =
-			self.0.create(amount_msat, Memo::Text(memo.to_owned()), Duration::from_secs(3600));
+		let invoice = self.network.create(
+			amount_msat,
+			Memo::Text(memo.to_owned()),
+			Duration::from_secs(3600),
+		);
 		async move { Ok(invoice) }.boxed()
 	}
 
 	fn is_settled<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<bool>> {
-		let paid = self.0.find(Some(&to_hex(payment_hash)), None).is_some_and(|i| i.paid);
+		let paid = self.network.find(Some(&to_hex(payment_hash)), None).is_some_and(|i| i.paid);
 		async move { Ok(paid) }.boxed()
 	}
 
-	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<()>> {
-		async { self.0.pay(bolt11).map(|_| ()) }.boxed()
+	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<(), PayError>> {
+		let result = if self.broke {
+			Err(PayError::Unable("insufficient_balance".to_owned()))
+		} else {
+			self.network
+				.pay(bolt11)
+				.map(|_| ())
+				.map_err(|error| PayError::Failed(error.to_string()))
+		};
+		async move { result }.boxed()
 	}
 }
 

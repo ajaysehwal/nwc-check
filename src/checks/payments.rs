@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use super::{Context, Payments, describe};
 use crate::check::{Check, Level, Outcome};
-use crate::counterparty::{from_hex, sha256};
+use crate::counterparty::{PayError, from_hex, sha256};
 use crate::wallet::Request;
 
 const MEMO: &str = "nwc-check";
@@ -59,7 +59,10 @@ async fn receive(ctx: &Context, payments: &Payments) -> Outcome {
 	}
 	match payments.node.pay(invoice).await {
 		Ok(()) => RECEIVE.pass(format!("counterparty paid {}", sats(payments.amount_msat))),
-		Err(error) => RECEIVE.fail(format!("counterparty couldn't pay it: {error:#}")),
+		Err(PayError::Unable(reason)) => {
+			RECEIVE.skip(format!("counterparty couldn't pay: {reason}"))
+		}
+		Err(PayError::Failed(error)) => RECEIVE.fail(format!("payment failed: {error}")),
 	}
 }
 

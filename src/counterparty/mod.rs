@@ -1,5 +1,7 @@
 mod lnd;
 
+use std::fmt;
+
 use anyhow::Result;
 use bitcoin_hashes::sha256;
 use futures::future::BoxFuture;
@@ -16,6 +18,24 @@ pub struct Invoice {
 	pub payment_hash: [u8; 32],
 }
 
+#[derive(Debug)]
+pub enum PayError {
+	/// The counterparty couldn't attempt the payment, so the wallet isn't at fault.
+	Unable(String),
+	/// The payment was attempted and failed.
+	Failed(String),
+}
+
+impl fmt::Display for PayError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Unable(reason) | Self::Failed(reason) => f.write_str(reason),
+		}
+	}
+}
+
+impl std::error::Error for PayError {}
+
 pub trait Counterparty: Send + Sync {
 	fn info(&self) -> BoxFuture<'_, Result<NodeInfo>>;
 
@@ -27,7 +47,7 @@ pub trait Counterparty: Send + Sync {
 
 	fn is_settled<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<bool>>;
 
-	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<()>>;
+	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<(), PayError>>;
 }
 
 pub fn sha256(data: &[u8]) -> [u8; 32] {
