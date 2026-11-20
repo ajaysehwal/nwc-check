@@ -9,7 +9,7 @@ use nwc_check::wallet::Wallet;
 
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
-const PAYMENT_CHECKS: [&str; 4] = ["PAY-01", "PAY-02", "PAY-03", "CORE-04"];
+const PAYMENT_CHECKS: [&str; 5] = ["PAY-01", "PAY-02", "PAY-03", "CORE-04", "SAFE-03"];
 const INVOICE_CHECKS: [&str; 5] = ["CORE-01", "CORE-02", "CORE-03", "CORE-04", "CORE-05"];
 
 struct Run {
@@ -114,7 +114,7 @@ async fn buggy_wallet_is_caught() {
 }
 
 #[tokio::test]
-async fn each_invoice_bug_is_caught_on_its_own() {
+async fn each_bug_is_caught_on_its_own() {
 	let none = Bugs::default();
 	let cases = [
 		("CORE-01", Bugs { wrong_amount: true, ..none }),
@@ -122,6 +122,7 @@ async fn each_invoice_bug_is_caught_on_its_own() {
 		("CORE-03", Bugs { lookup_by_hash_only: true, ..none }),
 		("CORE-04", Bugs { never_settles: true, ..none }),
 		("CORE-05", Bugs { unknown_invoice_error: true, ..none }),
+		("SAFE-03", Bugs { pays_duplicates: true, ..none }),
 	];
 	for (id, bugs) in cases {
 		let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;

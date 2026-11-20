@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -13,16 +13,22 @@ use lightning_invoice::{Currency, InvoiceBuilder, PaymentSecret};
 use nostr::nips::nip47::NostrWalletConnectUri;
 use nostr::nips::{nip04, nip44};
 use nostr_sdk::prelude::{
-	Client, ClientNotification, Event, EventBuilder, Filter, FinalizeEvent, Keys, Kind, MockRelay,
-	StreamExt, Tag, Timestamp,
+	Client, ClientNotification, Event, EventBuilder, EventId, Filter, FinalizeEvent, Keys, Kind,
+	MockRelay, RelayMessage, StreamExt, Tag, Timestamp,
 };
 use nwc_check::counterparty::{
 	Counterparty, Invoice, NodeInfo, PayError, from_hex, sha256, to_hex,
 };
 use serde_json::{Value, json};
 
-const METHODS: [&str; 5] =
-	["get_info", "get_balance", "make_invoice", "lookup_invoice", "pay_invoice"];
+const METHODS: [&str; 6] = [
+	"get_info",
+	"get_balance",
+	"make_invoice",
+	"lookup_invoice",
+	"pay_invoice",
+	"list_transactions",
+];
 
 #[derive(Clone, Copy, Default)]
 pub struct Bugs {
@@ -35,6 +41,7 @@ pub struct Bugs {
 	pub lookup_by_hash_only: bool,
 	pub never_settles: bool,
 	pub unknown_invoice_error: bool,
+	pub pays_duplicates: bool,
 }
 
 impl Bugs {
@@ -49,6 +56,7 @@ impl Bugs {
 			lookup_by_hash_only: true,
 			never_settles: true,
 			unknown_invoice_error: true,
+			pays_duplicates: true,
 		}
 	}
 }
@@ -116,13 +124,13 @@ impl MockNetwork {
 		Invoice { bolt11, payment_hash }
 	}
 
-	fn pay(&self, bolt11: &str) -> Result<[u8; 32]> {
+	fn pay(&self, bolt11: &str, repeat: bool) -> Result<[u8; 32]> {
 		let mut invoices = self.invoices.lock().unwrap();
 		let invoice = invoices
 			.values_mut()
 			.find(|invoice| invoice.bolt11 == bolt11)
 			.ok_or_else(|| anyhow!("unknown invoice"))?;
-		if invoice.paid {
+		if invoice.paid && !repeat {
 			bail!("invoice already paid");
 		}
 		invoice.paid = true;
@@ -177,7 +185,7 @@ impl Counterparty for MockCounterparty {
 			Err(PayError::Unable("insufficient_balance".to_owned()))
 		} else {
 			self.network
-				.pay(bolt11)
+				.pay(bolt11, false)
 				.map(|_| ())
 				.map_err(|error| PayError::Failed(error.to_string()))
 		};
@@ -191,6 +199,8 @@ pub struct MockWallet {
 	client: Client,
 	bugs: Bugs,
 	network: MockNetwork,
+	seen: Mutex<HashSet<EventId>>,
+	paid: Mutex<Vec<[u8; 32]>>,
 }
 
 impl MockWallet {
@@ -204,8 +214,15 @@ impl MockWallet {
 		client.add_relay(url.as_str()).await.unwrap();
 		client.connect().and_wait(Duration::from_secs(2)).await;
 
-		let wallet =
-			Self { keys: Keys::generate(), client_keys: Keys::generate(), client, bugs, network };
+		let wallet = Self {
+			keys: Keys::generate(),
+			client_keys: Keys::generate(),
+			client,
+			bugs,
+			network,
+			seen: Mutex::default(),
+			paid: Mutex::default(),
+		};
 		let info = EventBuilder::new(Kind::WalletConnectInfo, METHODS.join(" "))
 			.tag(Tag::parse(["encryption", "nip44_v2 nip04"]).unwrap())
 			.finalize(&wallet.keys)
@@ -225,7 +242,10 @@ impl MockWallet {
 		wallet.client.subscribe(requests).await.unwrap();
 		tokio::spawn(async move {
 			while let Some(notification) = notifications.next().await {
-				if let ClientNotification::Event { event, .. } = notification {
+				// Raw relay messages, so duplicates of an event arrive too.
+				if let ClientNotification::Message { message, .. } = notification
+					&& let RelayMessage::Event { event, .. } = *message
+				{
 					wallet.handle(&event).await;
 				}
 			}
@@ -236,6 +256,9 @@ impl MockWallet {
 	async fn handle(&self, request: &Event) {
 		let expired = request.tags.expiration().is_some_and(|at| at < Timestamp::now());
 		if expired && !self.bugs.answer_expired {
+			return;
+		}
+		if !self.seen.lock().unwrap().insert(request.id) && !self.bugs.pays_duplicates {
 			return;
 		}
 
@@ -270,6 +293,7 @@ impl MockWallet {
 			"make_invoice" => Ok(self.make_invoice(&body["params"])),
 			"lookup_invoice" => self.lookup_invoice(&body["params"]),
 			"pay_invoice" => self.pay(body["params"]["invoice"].as_str().unwrap_or_default()),
+			"list_transactions" => Ok(self.list_transactions()),
 			_ if self.bugs.wrong_error_code => error("OTHER"),
 			_ => error("NOT_IMPLEMENTED"),
 		};
@@ -347,8 +371,25 @@ impl MockWallet {
 		}))
 	}
 
+	fn list_transactions(&self) -> Value {
+		let transactions: Vec<Value> = self
+			.paid
+			.lock()
+			.unwrap()
+			.iter()
+			.map(
+				|hash| json!({ "type": "outgoing", "payment_hash": to_hex(hash), "state": "settled" }),
+			)
+			.collect();
+		json!({ "transactions": transactions })
+	}
+
 	fn pay(&self, bolt11: &str) -> Result<Value, Value> {
-		let preimage = self.network.pay(bolt11).map_err(|_| error_value("PAYMENT_FAILED"))?;
+		let preimage = self
+			.network
+			.pay(bolt11, self.bugs.pays_duplicates)
+			.map_err(|_| error_value("PAYMENT_FAILED"))?;
+		self.paid.lock().unwrap().push(sha256(&preimage));
 		let preimage = if self.bugs.wrong_preimage { [0; 32] } else { preimage };
 		Ok(json!({ "preimage": to_hex(&preimage) }))
 	}
