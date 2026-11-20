@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
-use super::{Counterparty, Invoice, NodeInfo, to_hex};
+use super::{Counterparty, Invoice, NodeInfo, PayError, to_hex};
 
 pub struct Lnd {
 	http: Client,
@@ -69,9 +69,7 @@ impl Lnd {
 		let status = response.status();
 		let body = response.text().await?;
 		if !status.is_success() {
-			let message =
-				serde_json::from_str::<ErrorBody>(&body).map(|error| error.message).unwrap_or(body);
-			bail!("LND returned {status}: {message}");
+			bail!("LND returned {status}: {}", error_message(body));
 		}
 		serde_json::from_str(&body).context("unexpected reply from LND")
 	}
@@ -124,17 +122,41 @@ impl Counterparty for Lnd {
 		.boxed()
 	}
 
-	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<()>> {
+	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<(), PayError>> {
 		async move {
-			let body = json!({ "payment_request": bolt11 });
-			let payment: SendPayment = self.post("/v1/channels/transactions", body).await?;
+			let unable = |error: reqwest::Error| PayError::Unable(error.to_string());
+			let response = self
+				.request(Method::POST, "/v1/channels/transactions")
+				.json(&json!({ "payment_request": bolt11 }))
+				.send()
+				.await
+				.map_err(unable)?;
+			let status = response.status();
+			let body = response.text().await.map_err(unable)?;
+			if !status.is_success() {
+				let message = error_message(body);
+				return Err(if message.contains("permission denied") {
+					PayError::Unable(message)
+				} else {
+					PayError::Failed(format!("LND rejected the invoice: {message}"))
+				});
+			}
+			let payment: SendPayment = serde_json::from_str(&body)
+				.map_err(|_| PayError::Unable("unexpected reply from LND".to_owned()))?;
 			match payment.payment_error.filter(|error| !error.is_empty()) {
-				Some(error) => bail!("payment failed: {error}"),
+				Some(error) if error.contains("insufficient_balance") => {
+					Err(PayError::Unable(error))
+				}
+				Some(error) => Err(PayError::Failed(error)),
 				None => Ok(()),
 			}
 		}
 		.boxed()
 	}
+}
+
+fn error_message(body: String) -> String {
+	serde_json::from_str::<ErrorBody>(&body).map(|error| error.message).unwrap_or(body)
 }
 
 #[derive(Deserialize)]

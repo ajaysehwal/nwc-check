@@ -198,7 +198,7 @@ async fn settle(ctx: &Context) -> Outcome {
 		return SETTLE.skip(reason);
 	}
 	if let Err(error) = payments.node.pay(&invoice.to_string()).await {
-		return SETTLE.skip(format!("counterparty couldn't pay it: {error:#}"));
+		return SETTLE.skip(format!("counterparty couldn't pay it: {error}"));
 	}
 
 	let mut last = String::new();
