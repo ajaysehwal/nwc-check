@@ -1,4 +1,6 @@
 mod cli;
+mod config;
+mod polar;
 mod ui;
 
 use std::io::IsTerminal;
@@ -14,30 +16,33 @@ use nwc_check::counterparty::{Counterparty, Lnd};
 use nwc_check::report::Report;
 use nwc_check::wallet::Wallet;
 
-use crate::cli::{Cli, Command, CounterpartyArgs, Format, RunArgs};
+use crate::cli::{Cli, Command, Format, InitArgs, RunArgs};
+use crate::config::{Config, LndSettings, Settings};
 use crate::ui::Ui;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-	match Cli::parse().command {
+	let result = match Cli::parse().command {
 		Command::List => {
 			ui::write_stdout(&ui::catalog());
-			ExitCode::SUCCESS
+			Ok(ExitCode::SUCCESS)
 		}
-		Command::Run(args) => match run(args).await {
-			Ok(code) => code,
-			Err(error) => {
-				eprintln!("{} {error:#}", console::style("error:").red().bold());
-				ExitCode::from(2)
-			}
-		},
-	}
+		Command::Init(args) => init(args),
+		Command::Run(args) => run(args).await,
+	};
+	result.unwrap_or_else(|error| {
+		eprintln!("{} {error:#}", console::style("error:").red().bold());
+		ExitCode::from(2)
+	})
 }
 
 async fn run(args: RunArgs) -> Result<ExitCode> {
 	let started = Instant::now();
 	let uri = NostrWalletConnectUri::parse(args.uri.trim())
 		.context("invalid connection string, expected nostr+walletconnect://...")?;
+	let loaded = Config::load(args.config.as_deref())?;
+	let source = loaded.as_ref().map(|(path, _)| path.display().to_string());
+	let settings = Settings::resolve(&args, loaded.map(|(_, config)| config).unwrap_or_default())?;
 	let wallet_key = uri.public_key.to_hex();
 	let relays: Vec<String> = uri.relays.iter().map(ToString::to_string).collect();
 
@@ -52,21 +57,25 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	};
 
 	say(&|ui| ui.header(&wallet_key, &relays));
+	if let Some(source) = &source {
+		say(&|ui| ui.step(true, format!("Using settings from {source}")));
+	}
 
 	ui.busy("Connecting to relays");
-	let wallet = Wallet::connect(uri, Duration::from_secs(args.timeout))
+	let wallet = Wallet::connect(uri, settings.timeout)
 		.await
 		.context("failed to connect to the wallet's relays")?;
 	say(&|ui| ui.step(true, format!("Connected to {}", plural(relays.len(), "relay"))));
 
 	ui.busy("Reading wallet info");
-	let mut ctx = Context::load(wallet, args.network.map(|network| network.as_str().to_owned()))
-		.await
-		.context("failed to query the wallet service")?;
-	if args.counterparty.lnd_url.is_some() {
-		ctx = if args.counterparty.allow_spend {
+	let mut ctx =
+		Context::load(wallet, settings.network.map(|network| network.as_str().to_owned()))
+			.await
+			.context("failed to query the wallet service")?;
+	if let Some(lnd) = &settings.lnd {
+		ctx = if settings.allow_spend {
 			ui.busy("Connecting to the counterparty node");
-			ctx.with_payments(counterparty(&args.counterparty).await?)
+			ctx.with_payments(counterparty(lnd, &settings).await?)
 		} else {
 			ctx.block_payments("spending is off (see --allow-spend)")
 		};
@@ -75,7 +84,7 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 				true,
 				format!(
 					"Counterparty LND on {}, up to {} sats",
-					payments.network, args.counterparty.max_sats
+					payments.network, settings.max_sats
 				),
 			),
 			Err(reason) => ui.step(false, format!("Payment checks off: {reason}")),
@@ -106,7 +115,7 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	ui.busy(format!("Running checks 0/{total}"));
 	checks::run_by_section(&ctx, |section, outcomes| {
 		let shown: Vec<Outcome> =
-			outcomes.into_iter().filter(|outcome| selected(&args.only, outcome.id)).collect();
+			outcomes.into_iter().filter(|outcome| selected(&settings.only, outcome.id)).collect();
 		say(&|ui| ui.section(section, &shown));
 		results.extend(shown);
 		ui.busy(format!("Running checks {}/{total}", results.len()));
@@ -118,23 +127,45 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	let summary = Summary::of(&results);
 	if text {
 		ui.problems(&results);
-		ui.summary(&summary, started.elapsed(), args.strict);
+		ui.summary(&summary, started.elapsed(), settings.strict);
 	} else {
 		let report = Report::new(wallet_key, relays, started.elapsed().as_millis(), results);
 		ui::write_stdout(&format!("{}\n", report.to_json()));
 	}
 
-	Ok(exit_code(&summary, args.strict))
+	Ok(exit_code(&summary, settings.strict))
 }
 
-async fn counterparty(args: &CounterpartyArgs) -> Result<Payments> {
-	let (Some(url), Some(macaroon)) = (&args.lnd_url, &args.lnd_macaroon) else {
-		bail!("--lnd-url needs --lnd-macaroon");
-	};
-	let node = Lnd::new(url, macaroon, args.lnd_cert.as_deref(), Duration::from_secs(60))?;
+async fn counterparty(lnd: &LndSettings, settings: &Settings) -> Result<Payments> {
+	let node = Lnd::new(&lnd.url, &lnd.macaroon, lnd.cert.as_deref(), Duration::from_secs(60))?;
 	node.check_access().await.context("the counterparty LND node can't be used")?;
 	let info = node.info().await.context("failed to query the counterparty LND node")?;
-	Ok(Payments::new(Box::new(node), info.network, args.amount * 1000, args.max_sats * 1000))
+	Ok(Payments::new(
+		Box::new(node),
+		info.network,
+		settings.amount_sats * 1000,
+		settings.max_sats * 1000,
+	))
+}
+
+fn init(args: InitArgs) -> Result<ExitCode> {
+	if args.path.exists() && !args.force {
+		bail!("{} already exists; pass --force to overwrite it", args.path.display());
+	}
+	let node = args.polar.as_deref().map(polar::find).transpose()?;
+	std::fs::write(&args.path, config::template(node.as_ref()))
+		.with_context(|| format!("failed to write {}", args.path.display()))?;
+
+	let path = args.path.display();
+	let mut out = format!("Wrote {path}");
+	if let Some(name) = &args.polar {
+		out.push_str(&format!(" with Polar node {name} as the counterparty"));
+	}
+	out.push_str(
+		".\nSet allow = true under [spending] to run payment checks, then:\n\n  nwc-check run \"nostr+walletconnect://...\"\n",
+	);
+	ui::write_stdout(&out);
+	Ok(ExitCode::SUCCESS)
 }
 
 fn selected(only: &[String], id: &str) -> bool {

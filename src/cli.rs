@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use serde::Deserialize;
 
 #[derive(Parser)]
 #[command(
@@ -17,6 +18,8 @@ pub struct Cli {
 pub enum Command {
 	/// Run the checks against a wallet service
 	Run(RunArgs),
+	/// Write a nwc-check.toml with every setting, so runs only need the connection string
+	Init(InitArgs),
 	/// List all checks
 	List,
 }
@@ -27,9 +30,13 @@ pub struct RunArgs {
 	#[arg(env = "NWC_URI", hide_env_values = true)]
 	pub uri: String,
 
-	/// Seconds to wait for each reply
-	#[arg(long, default_value_t = 10, value_name = "SECS")]
-	pub timeout: u64,
+	/// Settings file. Defaults to ./nwc-check.toml when it exists
+	#[arg(long, env = "NWC_CHECK_CONFIG", value_name = "PATH")]
+	pub config: Option<PathBuf>,
+
+	/// Seconds to wait for each reply (default 10)
+	#[arg(long, value_name = "SECS")]
+	pub timeout: Option<u64>,
 
 	/// Network the wallet is expected to report
 	#[arg(long, value_enum)]
@@ -60,7 +67,7 @@ pub struct RunArgs {
 #[command(next_help_heading = "Payment checks")]
 pub struct CounterpartyArgs {
 	/// LND REST URL of the counterparty node, e.g. https://localhost:8080
-	#[arg(long, value_name = "URL", requires = "lnd_macaroon")]
+	#[arg(long, value_name = "URL")]
 	pub lnd_url: Option<String>,
 
 	/// LND macaroon file (admin.macaroon, or one that can create invoices and send payments)
@@ -75,13 +82,28 @@ pub struct CounterpartyArgs {
 	#[arg(long)]
 	pub allow_spend: bool,
 
-	/// Amount for each test payment
-	#[arg(long, default_value_t = 10, value_name = "SATS")]
-	pub amount: u64,
+	/// Amount for each test payment (default 10)
+	#[arg(long, value_name = "SATS")]
+	pub amount: Option<u64>,
 
-	/// Most sats all payments in a run may move together
-	#[arg(long, default_value_t = 100, value_name = "SATS")]
-	pub max_sats: u64,
+	/// Most sats all payments in a run may move together (default 100)
+	#[arg(long, value_name = "SATS")]
+	pub max_sats: Option<u64>,
+}
+
+#[derive(clap::Args)]
+pub struct InitArgs {
+	/// Fill in the counterparty from this LND node in Polar, e.g. alice
+	#[arg(long, value_name = "NODE")]
+	pub polar: Option<String>,
+
+	/// Where to write the settings
+	#[arg(long, default_value = "nwc-check.toml", value_name = "PATH")]
+	pub path: PathBuf,
+
+	/// Overwrite an existing file
+	#[arg(long)]
+	pub force: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -90,7 +112,8 @@ pub enum Format {
 	Json,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Network {
 	Mainnet,
 	Testnet,
