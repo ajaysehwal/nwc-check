@@ -34,6 +34,7 @@ pub struct SpendingConfig {
 	pub allow: Option<bool>,
 	pub amount: Option<u64>,
 	pub max_sats: Option<u64>,
+	pub budget_sats: Option<u64>,
 }
 
 impl Config {
@@ -75,6 +76,7 @@ pub struct Settings {
 	pub allow_spend: bool,
 	pub amount_sats: u64,
 	pub max_sats: u64,
+	pub budget_sats: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -108,6 +110,7 @@ impl Settings {
 			allow_spend: cli.allow_spend || config.spending.allow.unwrap_or(false),
 			amount_sats: cli.amount.or(config.spending.amount).unwrap_or(10),
 			max_sats: cli.max_sats.or(config.spending.max_sats).unwrap_or(100),
+			budget_sats: cli.budget_sats.or(config.spending.budget_sats),
 		};
 		if settings.amount_sats == 0 {
 			bail!("the payment amount must be at least 1 sat");
@@ -162,6 +165,9 @@ allow = false
 amount = 10
 # Most sats one run may move in total
 max_sats = 100
+# Remaining budget of this connection, for wallets without get_budget.
+# SAFE-02 uses it up.
+# budget_sats = 50
 "#
 	)
 }

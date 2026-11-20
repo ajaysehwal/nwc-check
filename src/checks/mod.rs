@@ -1,3 +1,4 @@
+mod budget;
 mod discovery;
 mod encryption;
 mod errors;
@@ -23,6 +24,7 @@ pub struct Payments {
 	pub node: Box<dyn Counterparty>,
 	pub network: String,
 	pub amount_msat: u64,
+	pub wallet_budget_msat: Option<u64>,
 	remaining_msat: Mutex<u64>,
 }
 
@@ -33,11 +35,25 @@ impl Payments {
 		amount_msat: u64,
 		max_msat: u64,
 	) -> Self {
-		Self { node, network, amount_msat, remaining_msat: Mutex::new(max_msat) }
+		Self {
+			node,
+			network,
+			amount_msat,
+			wallet_budget_msat: None,
+			remaining_msat: Mutex::new(max_msat),
+		}
+	}
+
+	pub fn with_wallet_budget(mut self, budget_msat: Option<u64>) -> Self {
+		self.wallet_budget_msat = budget_msat;
+		self
 	}
 
 	pub fn reserve(&self, payments: u64) -> Result<(), String> {
-		let needed = self.amount_msat * payments;
+		self.reserve_msat(self.amount_msat * payments)
+	}
+
+	pub fn reserve_msat(&self, needed: u64) -> Result<(), String> {
 		let mut remaining = self.remaining_msat.lock().unwrap_or_else(|e| e.into_inner());
 		if *remaining < needed {
 			return Err(format!("would go over --max-sats ({} sats left)", *remaining / 1000));
@@ -146,10 +162,11 @@ pub enum Section {
 	Safety,
 	Invoices,
 	Payments,
+	Budget,
 }
 
 impl Section {
-	pub const ALL: [Section; 7] = [
+	pub const ALL: [Section; 8] = [
 		Self::Discovery,
 		Self::Encryption,
 		Self::Responses,
@@ -157,6 +174,7 @@ impl Section {
 		Self::Safety,
 		Self::Invoices,
 		Self::Payments,
+		Self::Budget,
 	];
 
 	pub fn title(self) -> &'static str {
@@ -168,6 +186,7 @@ impl Section {
 			Self::Safety => "Safety",
 			Self::Invoices => "Invoices",
 			Self::Payments => "Payments",
+			Self::Budget => "Budget",
 		}
 	}
 
@@ -180,6 +199,7 @@ impl Section {
 			Self::Safety => safety::CHECKS,
 			Self::Invoices => invoices::CHECKS,
 			Self::Payments => payments::CHECKS,
+			Self::Budget => budget::CHECKS,
 		}
 	}
 
@@ -192,6 +212,7 @@ impl Section {
 			Self::Safety => safety::run(ctx).await,
 			Self::Invoices => invoices::run(ctx).await,
 			Self::Payments => payments::run(ctx).await,
+			Self::Budget => budget::run(ctx).await,
 		}
 	}
 }
@@ -201,20 +222,25 @@ pub fn catalog() -> Vec<&'static Check> {
 }
 
 pub async fn run_by_section(ctx: &Context, mut on_section: impl FnMut(Section, Vec<Outcome>)) {
-	let mut pending: FuturesUnordered<_> = Section::ALL
+	// Budget uses up the connection's budget, so it runs after every other section.
+	let (together, after) = Section::ALL.split_at(Section::ALL.len() - 1);
+	let mut pending: FuturesUnordered<_> = together
 		.iter()
 		.enumerate()
 		.map(|(index, section)| async move { (index, section.run(ctx).await) })
 		.collect();
 
-	let mut ready: Vec<Option<Vec<Outcome>>> = vec![None; Section::ALL.len()];
+	let mut ready: Vec<Option<Vec<Outcome>>> = vec![None; together.len()];
 	let mut next = 0;
 	while let Some((index, outcomes)) = pending.next().await {
 		ready[index] = Some(outcomes);
 		while let Some(outcomes) = ready.get_mut(next).and_then(Option::take) {
-			on_section(Section::ALL[next], outcomes);
+			on_section(together[next], outcomes);
 			next += 1;
 		}
+	}
+	for section in after {
+		on_section(*section, section.run(ctx).await);
 	}
 }
 

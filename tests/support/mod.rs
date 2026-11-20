@@ -21,13 +21,14 @@ use nwc_check::counterparty::{
 };
 use serde_json::{Value, json};
 
-const METHODS: [&str; 6] = [
+const METHODS: [&str; 7] = [
 	"get_info",
 	"get_balance",
 	"make_invoice",
 	"lookup_invoice",
 	"pay_invoice",
 	"list_transactions",
+	"get_budget",
 ];
 
 #[derive(Clone, Copy, Default)]
@@ -42,6 +43,7 @@ pub struct Bugs {
 	pub never_settles: bool,
 	pub unknown_invoice_error: bool,
 	pub pays_duplicates: bool,
+	pub racy_budget: bool,
 }
 
 impl Bugs {
@@ -57,6 +59,7 @@ impl Bugs {
 			never_settles: true,
 			unknown_invoice_error: true,
 			pays_duplicates: true,
+			racy_budget: true,
 		}
 	}
 }
@@ -122,6 +125,14 @@ impl MockNetwork {
 		let invoice = MockInvoice { bolt11: bolt11.clone(), preimage, amount_msat, paid: false };
 		self.invoices.lock().unwrap().insert(to_hex(&payment_hash), invoice);
 		Invoice { bolt11, payment_hash }
+	}
+
+	fn amount_msat(&self, bolt11: &str) -> Option<u64> {
+		let invoices = self.invoices.lock().unwrap();
+		invoices
+			.values()
+			.find(|invoice| invoice.bolt11 == bolt11)
+			.map(|invoice| invoice.amount_msat)
 	}
 
 	fn pay(&self, bolt11: &str, repeat: bool) -> Result<[u8; 32]> {
@@ -201,6 +212,18 @@ pub struct MockWallet {
 	network: MockNetwork,
 	seen: Mutex<HashSet<EventId>>,
 	paid: Mutex<Vec<[u8; 32]>>,
+	budget: Option<Mutex<Budget>>,
+}
+
+struct Budget {
+	total_msat: u64,
+	used_msat: u64,
+}
+
+impl Budget {
+	fn fits(&self, amount_msat: u64) -> bool {
+		self.used_msat + amount_msat <= self.total_msat
+	}
 }
 
 impl MockWallet {
@@ -208,6 +231,7 @@ impl MockWallet {
 		relay: &MockRelay,
 		bugs: Bugs,
 		network: MockNetwork,
+		budget_msat: Option<u64>,
 	) -> NostrWalletConnectUri {
 		let url = relay.url().await;
 		let client = Client::default();
@@ -222,6 +246,7 @@ impl MockWallet {
 			network,
 			seen: Mutex::default(),
 			paid: Mutex::default(),
+			budget: budget_msat.map(|total_msat| Mutex::new(Budget { total_msat, used_msat: 0 })),
 		};
 		let info = EventBuilder::new(Kind::WalletConnectInfo, METHODS.join(" "))
 			.tag(Tag::parse(["encryption", "nip44_v2 nip04"]).unwrap())
@@ -240,13 +265,15 @@ impl MockWallet {
 		let requests =
 			Filter::new().kind(Kind::WalletConnectRequest).pubkey(wallet.keys.public_key());
 		wallet.client.subscribe(requests).await.unwrap();
+		let wallet = Arc::new(wallet);
 		tokio::spawn(async move {
 			while let Some(notification) = notifications.next().await {
 				// Raw relay messages, so duplicates of an event arrive too.
 				if let ClientNotification::Message { message, .. } = notification
 					&& let RelayMessage::Event { event, .. } = *message
 				{
-					wallet.handle(&event).await;
+					let (wallet, event) = (wallet.clone(), event.into_owned());
+					tokio::spawn(async move { wallet.handle(&event).await });
 				}
 			}
 		});
@@ -292,7 +319,8 @@ impl MockWallet {
 			"get_balance" => Ok(json!({ "balance": 21_000 })),
 			"make_invoice" => Ok(self.make_invoice(&body["params"])),
 			"lookup_invoice" => self.lookup_invoice(&body["params"]),
-			"pay_invoice" => self.pay(body["params"]["invoice"].as_str().unwrap_or_default()),
+			"pay_invoice" => self.pay(body["params"]["invoice"].as_str().unwrap_or_default()).await,
+			"get_budget" => Ok(self.get_budget()),
 			"list_transactions" => Ok(self.list_transactions()),
 			_ if self.bugs.wrong_error_code => error("OTHER"),
 			_ => error("NOT_IMPLEMENTED"),
@@ -384,7 +412,39 @@ impl MockWallet {
 		json!({ "transactions": transactions })
 	}
 
-	fn pay(&self, bolt11: &str) -> Result<Value, Value> {
+	fn get_budget(&self) -> Value {
+		match &self.budget {
+			Some(budget) => {
+				let budget = budget.lock().unwrap();
+				json!({ "total_budget": budget.total_msat, "used_budget": budget.used_msat })
+			}
+			None => json!({}),
+		}
+	}
+
+	async fn charge(&self, amount_msat: u64) -> Result<(), Value> {
+		let Some(budget) = &self.budget else { return Ok(()) };
+		if !self.bugs.racy_budget {
+			let mut budget = budget.lock().unwrap();
+			if !budget.fits(amount_msat) {
+				return Err(error_value("QUOTA_EXCEEDED"));
+			}
+			budget.used_msat += amount_msat;
+			return Ok(());
+		}
+		let fits = budget.lock().unwrap().fits(amount_msat);
+		if !fits {
+			return Err(error_value("QUOTA_EXCEEDED"));
+		}
+		tokio::time::sleep(Duration::from_millis(50)).await;
+		budget.lock().unwrap().used_msat += amount_msat;
+		Ok(())
+	}
+
+	async fn pay(&self, bolt11: &str) -> Result<Value, Value> {
+		let amount_msat =
+			self.network.amount_msat(bolt11).ok_or_else(|| error_value("PAYMENT_FAILED"))?;
+		self.charge(amount_msat).await?;
 		let preimage = self
 			.network
 			.pay(bolt11, self.bugs.pays_duplicates)
