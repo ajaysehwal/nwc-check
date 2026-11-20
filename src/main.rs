@@ -59,22 +59,27 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 		.context("failed to connect to the wallet's relays")?;
 	say(&|ui| ui.step(true, format!("Connected to {}", plural(relays.len(), "relay"))));
 
-	let payments = match &args.counterparty.lnd_url {
-		Some(_) => {
-			ui.busy("Connecting to the counterparty node");
-			let (payments, network) = counterparty(&args.counterparty).await?;
-			say(&|ui| ui.step(true, format!("Counterparty LND on {network}")));
-			Some(payments)
-		}
-		None => None,
-	};
-
 	ui.busy("Reading wallet info");
 	let mut ctx = Context::load(wallet, args.network.map(|network| network.as_str().to_owned()))
 		.await
 		.context("failed to query the wallet service")?;
-	if let Some(payments) = payments {
-		ctx = ctx.with_payments(payments);
+	if args.counterparty.lnd_url.is_some() {
+		ctx = if args.counterparty.allow_spend {
+			ui.busy("Connecting to the counterparty node");
+			ctx.with_payments(counterparty(&args.counterparty).await?)
+		} else {
+			ctx.block_payments("spending is off (see --allow-spend)")
+		};
+		say(&|ui| match &ctx.payments {
+			Ok(payments) => ui.step(
+				true,
+				format!(
+					"Counterparty LND on {}, up to {} sats",
+					payments.network, args.counterparty.max_sats
+				),
+			),
+			Err(reason) => ui.step(false, format!("Payment checks off: {reason}")),
+		});
 	}
 	say(&|ui| match &ctx.info {
 		Some(_) => ui.step(
@@ -122,20 +127,14 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	Ok(exit_code(&summary, args.strict))
 }
 
-async fn counterparty(args: &CounterpartyArgs) -> Result<(Payments, String)> {
+async fn counterparty(args: &CounterpartyArgs) -> Result<Payments> {
 	let (Some(url), Some(macaroon)) = (&args.lnd_url, &args.lnd_macaroon) else {
 		bail!("--lnd-url needs --lnd-macaroon");
 	};
 	let node = Lnd::new(url, macaroon, args.lnd_cert.as_deref(), Duration::from_secs(60))?;
 	node.check_access().await.context("the counterparty LND node can't be used")?;
 	let info = node.info().await.context("failed to query the counterparty LND node")?;
-	if info.network == "mainnet" && !args.allow_mainnet {
-		bail!(
-			"the counterparty node is on mainnet and payment checks move real funds; pass --allow-mainnet to run them anyway"
-		);
-	}
-	let payments = Payments { node: Box::new(node), amount_msat: args.amount * 1000 };
-	Ok((payments, info.network))
+	Ok(Payments::new(Box::new(node), info.network, args.amount * 1000, args.max_sats * 1000))
 }
 
 fn selected(only: &[String], id: &str) -> bool {

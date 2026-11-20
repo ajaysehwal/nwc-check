@@ -5,6 +5,8 @@ mod payments;
 mod response;
 mod safety;
 
+use std::sync::Mutex;
+
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use nostr_sdk::prelude::Event;
@@ -14,10 +16,33 @@ use crate::counterparty::Counterparty;
 use crate::wallet::{Encryption, Reply, Request, Scheme, Wallet, WalletError};
 
 pub const UNKNOWN_METHOD: &str = "nwc_check_unknown_method";
+pub const NO_COUNTERPARTY: &str = "no counterparty node (see --lnd-url)";
 
 pub struct Payments {
 	pub node: Box<dyn Counterparty>,
+	pub network: String,
 	pub amount_msat: u64,
+	remaining_msat: Mutex<u64>,
+}
+
+impl Payments {
+	pub fn new(
+		node: Box<dyn Counterparty>,
+		network: String,
+		amount_msat: u64,
+		max_msat: u64,
+	) -> Self {
+		Self { node, network, amount_msat, remaining_msat: Mutex::new(max_msat) }
+	}
+
+	pub fn reserve(&self) -> Result<(), String> {
+		let mut remaining = self.remaining_msat.lock().unwrap_or_else(|e| e.into_inner());
+		if *remaining < self.amount_msat {
+			return Err(format!("would go over --max-sats ({} sats left)", *remaining / 1000));
+		}
+		*remaining -= self.amount_msat;
+		Ok(())
+	}
 }
 
 pub struct Context {
@@ -28,7 +53,7 @@ pub struct Context {
 	pub expected_network: Option<String>,
 	pub get_info: Result<Reply, WalletError>,
 	pub unknown_method: Result<Reply, WalletError>,
-	pub payments: Option<Payments>,
+	pub payments: Result<Payments, String>,
 }
 
 impl Context {
@@ -62,13 +87,31 @@ impl Context {
 			expected_network,
 			get_info,
 			unknown_method,
-			payments: None,
+			payments: Err(NO_COUNTERPARTY.to_owned()),
 		})
 	}
 
 	pub fn with_payments(mut self, payments: Payments) -> Self {
-		self.payments = Some(payments);
+		self.payments = match self.network() {
+			None => Err("the wallet didn't report its network".to_owned()),
+			Some("mainnet") => Err("the wallet is on mainnet".to_owned()),
+			_ if payments.network == "mainnet" => Err("the counterparty is on mainnet".to_owned()),
+			Some(network) if network != payments.network => Err(format!(
+				"the wallet is on {network} but the counterparty is on {}",
+				payments.network
+			)),
+			_ => Ok(payments),
+		};
 		self
+	}
+
+	pub fn block_payments(mut self, reason: impl Into<String>) -> Self {
+		self.payments = Err(reason.into());
+		self
+	}
+
+	pub fn network(&self) -> Option<&str> {
+		self.get_info.as_ref().ok()?.result()?.get("network")?.as_str()
 	}
 
 	pub fn supports(&self, method: &str) -> bool {
