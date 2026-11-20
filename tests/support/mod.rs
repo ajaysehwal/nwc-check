@@ -49,6 +49,7 @@ pub struct Bugs {
 	pub no_fees_paid: bool,
 	pub ignores_amount: bool,
 	pub hidden_fee: bool,
+	pub ignores_permissions: bool,
 }
 
 impl Bugs {
@@ -68,6 +69,7 @@ impl Bugs {
 			no_fees_paid: true,
 			ignores_amount: true,
 			hidden_fee: true,
+			ignores_permissions: true,
 		}
 	}
 }
@@ -218,9 +220,15 @@ impl Counterparty for MockCounterparty {
 	}
 }
 
+pub struct MockConnections {
+	pub uri: NostrWalletConnectUri,
+	pub readonly: NostrWalletConnectUri,
+}
+
 pub struct MockWallet {
 	keys: Keys,
 	client_keys: Keys,
+	readonly_keys: Keys,
 	client: Client,
 	bugs: Bugs,
 	network: MockNetwork,
@@ -247,7 +255,7 @@ impl MockWallet {
 		bugs: Bugs,
 		network: MockNetwork,
 		budget_msat: Option<u64>,
-	) -> NostrWalletConnectUri {
+	) -> MockConnections {
 		let url = relay.url().await;
 		let client = Client::default();
 		client.add_relay(url.as_str()).await.unwrap();
@@ -256,6 +264,7 @@ impl MockWallet {
 		let wallet = Self {
 			keys: Keys::generate(),
 			client_keys: Keys::generate(),
+			readonly_keys: Keys::generate(),
 			client,
 			bugs,
 			network,
@@ -270,12 +279,18 @@ impl MockWallet {
 			.unwrap();
 		wallet.client.send_event(&info).await.unwrap();
 
-		let uri = NostrWalletConnectUri::new(
-			wallet.keys.public_key(),
-			vec![url],
-			wallet.client_keys.secret_key().clone(),
-			None,
-		);
+		let connection = |keys: &Keys| {
+			NostrWalletConnectUri::new(
+				wallet.keys.public_key(),
+				vec![url.clone()],
+				keys.secret_key().clone(),
+				None,
+			)
+		};
+		let connections = MockConnections {
+			uri: connection(&wallet.client_keys),
+			readonly: connection(&wallet.readonly_keys),
+		};
 
 		let mut notifications = wallet.client.notifications();
 		let requests =
@@ -293,7 +308,7 @@ impl MockWallet {
 				}
 			}
 		});
-		uri
+		connections
 	}
 
 	async fn handle(&self, request: &Event) {
@@ -315,7 +330,8 @@ impl MockWallet {
 					.await;
 			}
 		};
-		if request.pubkey != self.client_keys.public_key() {
+		let readonly = request.pubkey == self.readonly_keys.public_key();
+		if request.pubkey != self.client_keys.public_key() && !readonly {
 			return self.reply(request, nip44, "get_info", error("UNAUTHORIZED")).await;
 		}
 
@@ -329,6 +345,7 @@ impl MockWallet {
 		let method = body["method"].as_str().unwrap_or_default().to_owned();
 
 		let outcome = match method.as_str() {
+			"pay_invoice" if readonly && !self.bugs.ignores_permissions => error("RESTRICTED"),
 			"get_info" => {
 				Ok(json!({ "alias": "mock", "network": self.network.chain, "methods": METHODS }))
 			}

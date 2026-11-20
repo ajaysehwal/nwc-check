@@ -30,6 +30,10 @@ pub struct RunArgs {
 	#[arg(env = "NWC_URI", hide_env_values = true)]
 	pub uri: String,
 
+	/// Second connection to the same wallet without pay_invoice permission, for SAFE-05
+	#[arg(long, env = "NWC_READONLY_URI", hide_env_values = true, value_name = "URI")]
+	pub readonly_uri: Option<String>,
+
 	/// Settings file. Defaults to ./nwc-check.toml when it exists
 	#[arg(long, env = "NWC_CHECK_CONFIG", value_name = "PATH")]
 	pub config: Option<PathBuf>,

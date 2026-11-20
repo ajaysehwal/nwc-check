@@ -27,6 +27,7 @@ nwc-check run
 
 | Option | Description |
 |---|---|
+| `--readonly-uri <URI>` | Second connection without `pay_invoice`, for SAFE-05 (or `NWC_READONLY_URI`) |
 | `--config <PATH>` | Settings file (default `./nwc-check.toml` when it exists) |
 | `--network <NETWORK>` | Fail if the wallet reports a different network (`mainnet`, `testnet`, `signet`, `regtest`) |
 | `--only <IDS>` | Only report checks whose ID starts with one of these prefixes, e.g. `DISC,ENC-01` |
@@ -160,6 +161,7 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 | SAFE-01 | SAFETY | Expired requests are ignored |
 | SAFE-03 | SAFETY | A duplicated pay_invoice is paid once |
 | SAFE-02 | SAFETY | Concurrent payments stay within the budget |
+| SAFE-05 | SAFETY | A read-only connection can't pay |
 | CORE-01 | MUST | make_invoice matches amount, description and expiry |
 | CORE-02 | MUST | make_invoice sets the description_hash |
 | CORE-03 | MUST | lookup_invoice finds by payment_hash and invoice |
@@ -177,6 +179,8 @@ Checks for methods or encryption schemes the wallet doesn't advertise are skippe
 SAFE-03 sends one signed `pay_invoice` event, then publishes the identical event again after the wallet replies, and counts settled payments for that hash with `list_transactions`. It reserves twice the payment amount from `--max-sats`, since a wallet with this bug pays twice. It's skipped when the relays don't pass the copy on.
 
 CORE-09 compares `get_balance` before and after one payment. It allows up to 1 sat of difference for wallets that round to whole sats. Payment checks are skipped, not failed, when the wallet refuses with `QUOTA_EXCEEDED`, since that means the connection's budget ran out.
+
+SAFE-05 needs a second connection to the same wallet that doesn't have `pay_invoice` permission. Pass it with `--readonly-uri` or `NWC_READONLY_URI`; like the main connection string, it's never read from the settings file. The read-only connection tries to pay a counterparty invoice, and the check passes only if the wallet replies `RESTRICTED` and nothing arrives.
 
 SAFE-02 reads the connection's remaining budget with `get_budget`, or from `--budget-sats` for wallets without it. It then sends five payments at once, sized so four fit the budget and five don't, and checks how much the counterparty actually received. It runs after every other check because it uses up the connection's budget, so use a connection with a small budget. The five payments together must fit under `--max-sats`.
 
