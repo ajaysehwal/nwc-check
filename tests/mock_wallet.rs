@@ -9,7 +9,8 @@ use nwc_check::wallet::Wallet;
 
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
-const PAYMENT_CHECKS: [&str; 3] = ["PAY-01", "PAY-02", "PAY-03"];
+const PAYMENT_CHECKS: [&str; 4] = ["PAY-01", "PAY-02", "PAY-03", "CORE-04"];
+const INVOICE_CHECKS: [&str; 5] = ["CORE-01", "CORE-02", "CORE-03", "CORE-04", "CORE-05"];
 
 struct Run {
 	bugs: Bugs,
@@ -50,7 +51,7 @@ async fn compliant_wallet_has_no_failures() {
 	let problems: Vec<&Outcome> = outcomes.iter().filter(|outcome| outcome.is_problem()).collect();
 	assert!(problems.is_empty(), "{problems:#?}");
 	assert_eq!(outcomes.len(), checks::catalog().len());
-	for id in PAYMENT_CHECKS {
+	for id in PAYMENT_CHECKS.iter().chain(&INVOICE_CHECKS) {
 		assert_eq!(status(&outcomes, id), Status::Pass, "{id}");
 	}
 }
@@ -76,22 +77,40 @@ async fn mainnet_wallet_spends_nothing() {
 #[tokio::test]
 async fn payments_stop_at_max_sats() {
 	let (outcomes, network) = Run { max_sats: 15, ..Run::default() }.checks().await;
-	assert_eq!(status(&outcomes, "PAY-01"), Status::Pass);
-	assert_eq!(status(&outcomes, "PAY-02"), Status::Skip);
-	assert!(network.moved_msat() <= 15_000);
+	let over_budget = outcomes.iter().filter(|outcome| outcome.detail.contains("--max-sats"));
+	assert!(over_budget.count() >= 2);
+	assert_eq!(network.moved_msat(), 10_000);
 }
 
 #[tokio::test]
 async fn buggy_wallet_is_caught() {
-	let bugs = Bugs {
-		answer_expired: true,
-		wrong_error_code: true,
-		skip_p_tag: true,
-		wrong_preimage: true,
-	};
-	let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;
+	let (outcomes, _) = Run { bugs: Bugs::all(), ..Run::default() }.checks().await;
 	assert_eq!(status(&outcomes, "ERR-01"), Status::Warn);
 	assert_eq!(status(&outcomes, "RESP-04"), Status::Warn);
 	assert!(matches!(status(&outcomes, "SAFE-01"), Status::Fail | Status::Skip));
 	assert_eq!(status(&outcomes, "PAY-03"), Status::Fail);
+	for id in INVOICE_CHECKS {
+		assert_eq!(status(&outcomes, id), Status::Fail, "{id}");
+	}
+}
+
+#[tokio::test]
+async fn each_invoice_bug_is_caught_on_its_own() {
+	let none = Bugs::default();
+	let cases = [
+		("CORE-01", Bugs { wrong_amount: true, ..none }),
+		("CORE-02", Bugs { ignore_description_hash: true, ..none }),
+		("CORE-03", Bugs { lookup_by_hash_only: true, ..none }),
+		("CORE-04", Bugs { never_settles: true, ..none }),
+		("CORE-05", Bugs { unknown_invoice_error: true, ..none }),
+	];
+	for (id, bugs) in cases {
+		let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;
+		let failed: Vec<&str> = outcomes
+			.iter()
+			.filter(|outcome| outcome.is_problem())
+			.map(|outcome| outcome.id)
+			.collect();
+		assert_eq!(failed, [id]);
+	}
 }

@@ -30,8 +30,8 @@ pub trait Counterparty: Send + Sync {
 	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<()>>;
 }
 
-pub fn payment_hash(preimage: &[u8]) -> [u8; 32] {
-	sha256::Hash::hash(preimage).to_byte_array()
+pub fn sha256(data: &[u8]) -> [u8; 32] {
+	sha256::Hash::hash(data).to_byte_array()
 }
 
 pub fn to_hex(bytes: &[u8]) -> String {

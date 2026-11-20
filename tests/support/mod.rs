@@ -1,21 +1,26 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow, bail};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 
+use bitcoin::hashes::Hash as _;
+use bitcoin::hashes::sha256::Hash as Sha256Hash;
+use bitcoin::secp256k1::{Secp256k1, SecretKey};
+use lightning_invoice::{Currency, InvoiceBuilder, PaymentSecret};
 use nostr::nips::nip47::NostrWalletConnectUri;
 use nostr::nips::{nip04, nip44};
 use nostr_sdk::prelude::{
 	Client, ClientNotification, Event, EventBuilder, Filter, FinalizeEvent, Keys, Kind, MockRelay,
 	StreamExt, Tag, Timestamp,
 };
-use nwc_check::counterparty::{Counterparty, Invoice, NodeInfo, payment_hash, to_hex};
+use nwc_check::counterparty::{Counterparty, Invoice, NodeInfo, from_hex, sha256, to_hex};
 use serde_json::{Value, json};
 
-const METHODS: [&str; 4] = ["get_info", "get_balance", "make_invoice", "pay_invoice"];
+const METHODS: [&str; 5] =
+	["get_info", "get_balance", "make_invoice", "lookup_invoice", "pay_invoice"];
 
 #[derive(Clone, Copy, Default)]
 pub struct Bugs {
@@ -23,16 +28,44 @@ pub struct Bugs {
 	pub wrong_error_code: bool,
 	pub skip_p_tag: bool,
 	pub wrong_preimage: bool,
+	pub wrong_amount: bool,
+	pub ignore_description_hash: bool,
+	pub lookup_by_hash_only: bool,
+	pub never_settles: bool,
+	pub unknown_invoice_error: bool,
+}
+
+impl Bugs {
+	pub fn all() -> Self {
+		Self {
+			answer_expired: true,
+			wrong_error_code: true,
+			skip_p_tag: true,
+			wrong_preimage: true,
+			wrong_amount: true,
+			ignore_description_hash: true,
+			lookup_by_hash_only: true,
+			never_settles: true,
+			unknown_invoice_error: true,
+		}
+	}
+}
+
+pub enum Memo {
+	Text(String),
+	Hash([u8; 32]),
 }
 
 #[derive(Clone)]
 pub struct MockNetwork {
 	chain: &'static str,
+	node_key: SecretKey,
 	invoices: Arc<Mutex<HashMap<String, MockInvoice>>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MockInvoice {
+	bolt11: String,
 	preimage: [u8; 32],
 	amount_msat: u64,
 	paid: bool,
@@ -46,7 +79,8 @@ impl Default for MockNetwork {
 
 impl MockNetwork {
 	pub fn new(chain: &'static str) -> Self {
-		Self { chain, invoices: Arc::default() }
+		let node_key = SecretKey::from_slice(&random_bytes()).unwrap();
+		Self { chain, node_key, invoices: Arc::default() }
 	}
 
 	pub fn moved_msat(&self) -> u64 {
@@ -54,20 +88,38 @@ impl MockNetwork {
 		invoices.values().filter(|invoice| invoice.paid).map(|invoice| invoice.amount_msat).sum()
 	}
 
-	fn create(&self, amount_msat: u64) -> Invoice {
-		let preimage = Keys::generate().secret_key().to_secret_bytes();
-		let payment_hash = payment_hash(&preimage);
-		let bolt11 = format!("lnmock{}", to_hex(&payment_hash));
-		self.invoices
-			.lock()
+	fn create(&self, amount_msat: u64, memo: Memo, expiry: Duration) -> Invoice {
+		let preimage = random_bytes();
+		let payment_hash = sha256(&preimage);
+		let currency = if self.chain == "mainnet" { Currency::Bitcoin } else { Currency::Regtest };
+		let builder = InvoiceBuilder::new(currency);
+		let builder = match memo {
+			Memo::Text(text) => builder.description(text),
+			Memo::Hash(hash) => builder.description_hash(Sha256Hash::from_byte_array(hash)),
+		};
+		let bolt11 = builder
+			.payment_hash(Sha256Hash::from_byte_array(payment_hash))
+			.payment_secret(PaymentSecret(random_bytes()))
+			.amount_milli_satoshis(amount_msat)
+			.expiry_time(expiry)
+			.duration_since_epoch(SystemTime::now().duration_since(UNIX_EPOCH).unwrap())
+			.min_final_cltv_expiry_delta(144)
+			.build_signed(|message| {
+				Secp256k1::new().sign_ecdsa_recoverable(message, &self.node_key)
+			})
 			.unwrap()
-			.insert(bolt11.clone(), MockInvoice { preimage, amount_msat, paid: false });
+			.to_string();
+		let invoice = MockInvoice { bolt11: bolt11.clone(), preimage, amount_msat, paid: false };
+		self.invoices.lock().unwrap().insert(to_hex(&payment_hash), invoice);
 		Invoice { bolt11, payment_hash }
 	}
 
 	fn pay(&self, bolt11: &str) -> Result<[u8; 32]> {
 		let mut invoices = self.invoices.lock().unwrap();
-		let invoice = invoices.get_mut(bolt11).ok_or_else(|| anyhow!("unknown invoice"))?;
+		let invoice = invoices
+			.values_mut()
+			.find(|invoice| invoice.bolt11 == bolt11)
+			.ok_or_else(|| anyhow!("unknown invoice"))?;
 		if invoice.paid {
 			bail!("invoice already paid");
 		}
@@ -75,10 +127,18 @@ impl MockNetwork {
 		Ok(invoice.preimage)
 	}
 
-	fn is_paid(&self, payment_hash: &[u8; 32]) -> bool {
-		let bolt11 = format!("lnmock{}", to_hex(payment_hash));
-		self.invoices.lock().unwrap().get(&bolt11).is_some_and(|invoice| invoice.paid)
+	fn find(&self, payment_hash: Option<&str>, bolt11: Option<&str>) -> Option<MockInvoice> {
+		let invoices = self.invoices.lock().unwrap();
+		match (payment_hash, bolt11) {
+			(Some(hash), _) => invoices.get(hash).cloned(),
+			(None, Some(bolt11)) => invoices.values().find(|i| i.bolt11 == bolt11).cloned(),
+			(None, None) => None,
+		}
 	}
+}
+
+fn random_bytes() -> [u8; 32] {
+	Keys::generate().secret_key().to_secret_bytes()
 }
 
 pub struct MockCounterparty(pub MockNetwork);
@@ -92,13 +152,16 @@ impl Counterparty for MockCounterparty {
 	fn create_invoice<'a>(
 		&'a self,
 		amount_msat: u64,
-		_: &'a str,
+		memo: &'a str,
 	) -> BoxFuture<'a, Result<Invoice>> {
-		async move { Ok(self.0.create(amount_msat)) }.boxed()
+		let invoice =
+			self.0.create(amount_msat, Memo::Text(memo.to_owned()), Duration::from_secs(3600));
+		async move { Ok(invoice) }.boxed()
 	}
 
 	fn is_settled<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<bool>> {
-		async { Ok(self.0.is_paid(payment_hash)) }.boxed()
+		let paid = self.0.find(Some(&to_hex(payment_hash)), None).is_some_and(|i| i.paid);
+		async move { Ok(paid) }.boxed()
 	}
 
 	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<()>> {
@@ -188,12 +251,8 @@ impl MockWallet {
 				Ok(json!({ "alias": "mock", "network": self.network.chain, "methods": METHODS }))
 			}
 			"get_balance" => Ok(json!({ "balance": 21_000 })),
-			"make_invoice" => {
-				let invoice = self.network.create(body["params"]["amount"].as_u64().unwrap_or(0));
-				Ok(
-					json!({ "invoice": invoice.bolt11, "payment_hash": to_hex(&invoice.payment_hash) }),
-				)
-			}
+			"make_invoice" => Ok(self.make_invoice(&body["params"])),
+			"lookup_invoice" => self.lookup_invoice(&body["params"]),
 			"pay_invoice" => self.pay(body["params"]["invoice"].as_str().unwrap_or_default()),
 			_ if self.bugs.wrong_error_code => error("OTHER"),
 			_ => error("NOT_IMPLEMENTED"),
@@ -230,6 +289,48 @@ impl MockWallet {
 }
 
 impl MockWallet {
+	fn make_invoice(&self, params: &Value) -> Value {
+		let mut amount_msat = params["amount"].as_u64().unwrap_or(0);
+		if self.bugs.wrong_amount {
+			amount_msat += 1000;
+		}
+		let description = params["description"].as_str().unwrap_or_default().to_owned();
+		let hash = params["description_hash"]
+			.as_str()
+			.and_then(from_hex)
+			.and_then(|bytes| <[u8; 32]>::try_from(bytes).ok());
+		let memo = match hash {
+			Some(hash) if !self.bugs.ignore_description_hash => Memo::Hash(hash),
+			_ => Memo::Text(description),
+		};
+		let expiry = Duration::from_secs(params["expiry"].as_u64().unwrap_or(3600));
+		let invoice = self.network.create(amount_msat, memo, expiry);
+		json!({
+			"type": "incoming",
+			"invoice": invoice.bolt11,
+			"payment_hash": to_hex(&invoice.payment_hash),
+			"amount": amount_msat,
+			"state": "pending",
+		})
+	}
+
+	fn lookup_invoice(&self, params: &Value) -> Result<Value, Value> {
+		let bolt11 = params["invoice"].as_str().filter(|_| !self.bugs.lookup_by_hash_only);
+		let not_found = if self.bugs.unknown_invoice_error { "INTERNAL" } else { "NOT_FOUND" };
+		let invoice = self
+			.network
+			.find(params["payment_hash"].as_str(), bolt11)
+			.ok_or_else(|| error_value(not_found))?;
+		let settled = invoice.paid && !self.bugs.never_settles;
+		Ok(json!({
+			"type": "incoming",
+			"invoice": invoice.bolt11,
+			"payment_hash": to_hex(&sha256(&invoice.preimage)),
+			"amount": invoice.amount_msat,
+			"state": if settled { "settled" } else { "pending" },
+		}))
+	}
+
 	fn pay(&self, bolt11: &str) -> Result<Value, Value> {
 		let preimage = self.network.pay(bolt11).map_err(|_| error_value("PAYMENT_FAILED"))?;
 		let preimage = if self.bugs.wrong_preimage { [0; 32] } else { preimage };
