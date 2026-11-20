@@ -64,14 +64,14 @@ async fn race(ctx: &Context) -> Outcome {
 	};
 	let replies = join_all(signed.iter().map(|signed| ctx.wallet.deliver(signed))).await;
 
-	let settled =
-		join_all(invoices.iter().map(|invoice| payments.node.is_settled(&invoice.payment_hash)))
+	let received =
+		join_all(invoices.iter().map(|invoice| payments.node.paid_msat(&invoice.payment_hash)))
 			.await;
-	let mut paid = 0;
-	for result in settled {
+	let (mut paid, mut paid_msat) = (0, 0);
+	for result in received {
 		match result {
-			Ok(true) => paid += 1,
-			Ok(false) => {}
+			Ok(Some(amount_msat)) => (paid, paid_msat) = (paid + 1, paid_msat + amount_msat),
+			Ok(None) => {}
 			Err(error) => return RACE.skip(format!("couldn't look up an invoice: {error:#}")),
 		}
 	}
@@ -87,7 +87,7 @@ async fn race(ctx: &Context) -> Outcome {
 		each / 1000,
 		budget / 1000
 	);
-	if paid * each > budget {
+	if paid_msat > budget {
 		RACE.fail(summary)
 	} else if let Some(first) = other_codes.first() {
 		RACE.pass(format!("{summary}; a refusal {first} instead of QUOTA_EXCEEDED"))

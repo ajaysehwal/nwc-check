@@ -8,7 +8,7 @@ use futures::future::BoxFuture;
 
 use bitcoin::hashes::Hash as _;
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
-use bitcoin::secp256k1::{Secp256k1, SecretKey};
+use bitcoin::secp256k1::{Message, Secp256k1, SecretKey};
 use lightning_invoice::{Currency, InvoiceBuilder, PaymentSecret};
 use nostr::nips::nip47::NostrWalletConnectUri;
 use nostr::nips::{nip04, nip44};
@@ -20,6 +20,8 @@ use nwc_check::counterparty::{
 	Counterparty, Invoice, NodeInfo, PayError, from_hex, sha256, to_hex,
 };
 use serde_json::{Value, json};
+
+const FEE_MSAT: u64 = 1000;
 
 const METHODS: [&str; 7] = [
 	"get_info",
@@ -44,6 +46,9 @@ pub struct Bugs {
 	pub unknown_invoice_error: bool,
 	pub pays_duplicates: bool,
 	pub racy_budget: bool,
+	pub no_fees_paid: bool,
+	pub ignores_amount: bool,
+	pub hidden_fee: bool,
 }
 
 impl Bugs {
@@ -60,6 +65,9 @@ impl Bugs {
 			unknown_invoice_error: true,
 			pays_duplicates: true,
 			racy_budget: true,
+			no_fees_paid: true,
+			ignores_amount: true,
+			hidden_fee: true,
 		}
 	}
 }
@@ -110,18 +118,20 @@ impl MockNetwork {
 			Memo::Text(text) => builder.description(text),
 			Memo::Hash(hash) => builder.description_hash(Sha256Hash::from_byte_array(hash)),
 		};
-		let bolt11 = builder
+		let builder = builder
 			.payment_hash(Sha256Hash::from_byte_array(payment_hash))
 			.payment_secret(PaymentSecret(random_bytes()))
-			.amount_milli_satoshis(amount_msat)
 			.expiry_time(expiry)
 			.duration_since_epoch(SystemTime::now().duration_since(UNIX_EPOCH).unwrap())
-			.min_final_cltv_expiry_delta(144)
-			.build_signed(|message| {
-				Secp256k1::new().sign_ecdsa_recoverable(message, &self.node_key)
-			})
-			.unwrap()
-			.to_string();
+			.min_final_cltv_expiry_delta(144);
+		let sign =
+			|message: &Message| Secp256k1::new().sign_ecdsa_recoverable(message, &self.node_key);
+		let signed = if amount_msat > 0 {
+			builder.amount_milli_satoshis(amount_msat).build_signed(sign)
+		} else {
+			builder.build_signed(sign)
+		};
+		let bolt11 = signed.unwrap().to_string();
 		let invoice = MockInvoice { bolt11: bolt11.clone(), preimage, amount_msat, paid: false };
 		self.invoices.lock().unwrap().insert(to_hex(&payment_hash), invoice);
 		Invoice { bolt11, payment_hash }
@@ -135,7 +145,7 @@ impl MockNetwork {
 			.map(|invoice| invoice.amount_msat)
 	}
 
-	fn pay(&self, bolt11: &str, repeat: bool) -> Result<[u8; 32]> {
+	fn pay(&self, bolt11: &str, repeat: bool, amount_msat: Option<u64>) -> Result<[u8; 32]> {
 		let mut invoices = self.invoices.lock().unwrap();
 		let invoice = invoices
 			.values_mut()
@@ -143,6 +153,9 @@ impl MockNetwork {
 			.ok_or_else(|| anyhow!("unknown invoice"))?;
 		if invoice.paid && !repeat {
 			bail!("invoice already paid");
+		}
+		if invoice.amount_msat == 0 {
+			invoice.amount_msat = amount_msat.ok_or_else(|| anyhow!("amountless invoice"))?;
 		}
 		invoice.paid = true;
 		Ok(invoice.preimage)
@@ -186,8 +199,9 @@ impl Counterparty for MockCounterparty {
 		async move { Ok(invoice) }.boxed()
 	}
 
-	fn is_settled<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<bool>> {
-		let paid = self.network.find(Some(&to_hex(payment_hash)), None).is_some_and(|i| i.paid);
+	fn paid_msat<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<Option<u64>>> {
+		let invoice = self.network.find(Some(&to_hex(payment_hash)), None);
+		let paid = invoice.filter(|invoice| invoice.paid).map(|invoice| invoice.amount_msat);
 		async move { Ok(paid) }.boxed()
 	}
 
@@ -196,7 +210,7 @@ impl Counterparty for MockCounterparty {
 			Err(PayError::Unable("insufficient_balance".to_owned()))
 		} else {
 			self.network
-				.pay(bolt11, false)
+				.pay(bolt11, false, None)
 				.map(|_| ())
 				.map_err(|error| PayError::Failed(error.to_string()))
 		};
@@ -213,6 +227,7 @@ pub struct MockWallet {
 	seen: Mutex<HashSet<EventId>>,
 	paid: Mutex<Vec<[u8; 32]>>,
 	budget: Option<Mutex<Budget>>,
+	balance_msat: Mutex<u64>,
 }
 
 struct Budget {
@@ -247,6 +262,7 @@ impl MockWallet {
 			seen: Mutex::default(),
 			paid: Mutex::default(),
 			budget: budget_msat.map(|total_msat| Mutex::new(Budget { total_msat, used_msat: 0 })),
+			balance_msat: Mutex::new(100_000_000),
 		};
 		let info = EventBuilder::new(Kind::WalletConnectInfo, METHODS.join(" "))
 			.tag(Tag::parse(["encryption", "nip44_v2 nip04"]).unwrap())
@@ -316,10 +332,10 @@ impl MockWallet {
 			"get_info" => {
 				Ok(json!({ "alias": "mock", "network": self.network.chain, "methods": METHODS }))
 			}
-			"get_balance" => Ok(json!({ "balance": 21_000 })),
+			"get_balance" => Ok(json!({ "balance": *self.balance_msat.lock().unwrap() })),
 			"make_invoice" => Ok(self.make_invoice(&body["params"])),
 			"lookup_invoice" => self.lookup_invoice(&body["params"]),
-			"pay_invoice" => self.pay(body["params"]["invoice"].as_str().unwrap_or_default()).await,
+			"pay_invoice" => self.pay(&body["params"]).await,
 			"get_budget" => Ok(self.get_budget()),
 			"list_transactions" => Ok(self.list_transactions()),
 			_ if self.bugs.wrong_error_code => error("OTHER"),
@@ -441,17 +457,31 @@ impl MockWallet {
 		Ok(())
 	}
 
-	async fn pay(&self, bolt11: &str) -> Result<Value, Value> {
-		let amount_msat =
-			self.network.amount_msat(bolt11).ok_or_else(|| error_value("PAYMENT_FAILED"))?;
-		self.charge(amount_msat).await?;
+	async fn pay(&self, params: &Value) -> Result<Value, Value> {
+		let failed = || error_value("PAYMENT_FAILED");
+		let bolt11 = params["invoice"].as_str().unwrap_or_default();
+		let amount_msat = match self.network.amount_msat(bolt11).ok_or_else(failed)? {
+			0 if self.bugs.ignores_amount => return Err(failed()),
+			0 => params["amount"].as_u64().ok_or_else(failed)?,
+			amount_msat => amount_msat,
+		};
+		self.charge(amount_msat + FEE_MSAT).await?;
 		let preimage = self
 			.network
-			.pay(bolt11, self.bugs.pays_duplicates)
-			.map_err(|_| error_value("PAYMENT_FAILED"))?;
+			.pay(bolt11, self.bugs.pays_duplicates, Some(amount_msat))
+			.map_err(|_| failed())?;
+		let hidden = if self.bugs.hidden_fee { 1000 } else { 0 };
+		let mut balance = self.balance_msat.lock().unwrap();
+		*balance = balance.saturating_sub(amount_msat + FEE_MSAT + hidden);
+		drop(balance);
 		self.paid.lock().unwrap().push(sha256(&preimage));
+
 		let preimage = if self.bugs.wrong_preimage { [0; 32] } else { preimage };
-		Ok(json!({ "preimage": to_hex(&preimage) }))
+		let mut result = json!({ "preimage": to_hex(&preimage) });
+		if !self.bugs.no_fees_paid {
+			result["fees_paid"] = json!(FEE_MSAT);
+		}
+		Ok(result)
 	}
 }
 

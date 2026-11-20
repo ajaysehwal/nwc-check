@@ -45,7 +45,8 @@ pub trait Counterparty: Send + Sync {
 		memo: &'a str,
 	) -> BoxFuture<'a, Result<Invoice>>;
 
-	fn is_settled<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<bool>>;
+	/// How much the invoice received, or None while it's unpaid.
+	fn paid_msat<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<Option<u64>>>;
 
 	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<(), PayError>>;
 }
