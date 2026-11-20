@@ -6,7 +6,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use reqwest::{Certificate, Client, RequestBuilder};
+use reqwest::{Certificate, Client, Method, RequestBuilder};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -41,8 +41,31 @@ impl Lnd {
 		})
 	}
 
+	pub async fn check_access(&self) -> Result<()> {
+		// Invalid requests: LND rejects them without side effects, and says "permission denied" first if the macaroon lacks access.
+		let probes = [
+			("/v1/invoices", json!({ "value_msat": "-1" }), "create invoices"),
+			("/v1/channels/transactions", json!({ "payment_request": "" }), "send payments"),
+		];
+		for (path, body, action) in probes {
+			let reply = self.request(Method::POST, path).json(&body).send().await?.text().await?;
+			if reply.contains("permission denied") {
+				bail!(
+					"the macaroon can't {action}; use admin.macaroon or one with info:read, invoices:write and offchain:write"
+				);
+			}
+		}
+		Ok(())
+	}
+
+	fn request(&self, method: Method, path: &str) -> RequestBuilder {
+		self.http
+			.request(method, format!("{}{path}", self.url))
+			.header("Grpc-Metadata-macaroon", &self.macaroon)
+	}
+
 	async fn call<T: DeserializeOwned>(&self, request: RequestBuilder) -> Result<T> {
-		let response = request.header("Grpc-Metadata-macaroon", &self.macaroon).send().await?;
+		let response = request.send().await?;
 		let status = response.status();
 		let body = response.text().await?;
 		if !status.is_success() {
@@ -54,11 +77,11 @@ impl Lnd {
 	}
 
 	async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-		self.call(self.http.get(format!("{}{path}", self.url))).await
+		self.call(self.request(Method::GET, path)).await
 	}
 
 	async fn post<T: DeserializeOwned>(&self, path: &str, body: serde_json::Value) -> Result<T> {
-		self.call(self.http.post(format!("{}{path}", self.url)).json(&body)).await
+		self.call(self.request(Method::POST, path).json(&body)).await
 	}
 }
 

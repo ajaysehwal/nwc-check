@@ -127,7 +127,8 @@ async fn counterparty(args: &CounterpartyArgs) -> Result<(Payments, String)> {
 		bail!("--lnd-url needs --lnd-macaroon");
 	};
 	let node = Lnd::new(url, macaroon, args.lnd_cert.as_deref(), Duration::from_secs(60))?;
-	let info = node.info().await.context("failed to reach the counterparty LND node")?;
+	node.check_access().await.context("the counterparty LND node can't be used")?;
+	let info = node.info().await.context("failed to query the counterparty LND node")?;
 	if info.network == "mainnet" && !args.allow_mainnet {
 		bail!(
 			"the counterparty node is on mainnet and payment checks move real funds; pass --allow-mainnet to run them anyway"

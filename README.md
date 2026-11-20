@@ -52,7 +52,7 @@ The counterparty needs a route to the wallet, for example a channel on regtest o
 | Option | Description |
 |---|---|
 | `--lnd-url <URL>` | LND REST URL |
-| `--lnd-macaroon <PATH>` | Macaroon that can create invoices and send payments |
+| `--lnd-macaroon <PATH>` | Macaroon with info:read, invoices:write and offchain:write, e.g. `admin.macaroon` |
 | `--lnd-cert <PATH>` | TLS certificate, for nodes with a self-signed cert |
 | `--amount <SATS>` | Amount of each test payment (default 10) |
 | `--allow-mainnet` | Allow payment checks against a mainnet counterparty |
