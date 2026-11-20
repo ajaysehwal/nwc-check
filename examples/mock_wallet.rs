@@ -12,7 +12,7 @@ async fn main() {
 	let bugs = if buggy { Bugs::all() } else { Bugs::default() };
 
 	let relay = MockRelay::run().await.expect("failed to start the local relay");
-	let uri = MockWallet::start(&relay, bugs, MockNetwork::default()).await;
+	let uri = MockWallet::start(&relay, bugs, MockNetwork::default(), Some(50_000)).await;
 	println!("{uri}");
 	eprintln!(
 		"Mock wallet running{}. Press Ctrl-C to stop.",
