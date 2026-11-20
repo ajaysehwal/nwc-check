@@ -4,7 +4,7 @@ Conformance and safety checks for [Nostr Wallet Connect](https://github.com/nost
 
 `nwc-check` connects to a wallet service the way an app would, sends it real NIP-47 requests, including malformed and adversarial ones, and reports whether it follows the spec and handles requests safely.
 
-By default every check is read-only and never moves funds. Payment checks only run with a counterparty node and `--allow-spend`, and never on mainnet.
+By default no check moves funds. Some create unpaid invoices in the wallet. Payment checks only run with a counterparty node and `--allow-spend`, and never on mainnet.
 
 ## Install
 
@@ -126,11 +126,16 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 | ERR-02 | SHOULD | Unknown client returns UNAUTHORIZED |
 | ERR-03 | SAFETY | Malformed params return an error |
 | SAFE-01 | SAFETY | Expired requests are ignored |
+| CORE-01 | MUST | make_invoice matches amount, description and expiry |
+| CORE-02 | MUST | make_invoice sets the description_hash |
+| CORE-03 | MUST | lookup_invoice finds by payment_hash and invoice |
+| CORE-04 | MUST | lookup_invoice shows pending, then settled |
+| CORE-05 | MUST | Unknown invoice returns NOT_FOUND |
 | PAY-01 | MUST | make_invoice returns a payable invoice |
 | PAY-02 | MUST | pay_invoice delivers the payment |
 | PAY-03 | SAFETY | pay_invoice returns the matching preimage |
 
-Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks are skipped without a counterparty and `--allow-spend`, and on mainnet.
+Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks and CORE-04, which pays an invoice, are skipped without a counterparty and `--allow-spend`, and on mainnet. Invoice checks decode the returned BOLT11 invoice rather than trusting the reply's fields.
 
 ## Architecture
 
@@ -151,6 +156,7 @@ src/
     ├── response.rs
     ├── errors.rs
     ├── safety.rs
+    ├── invoices.rs
     └── payments.rs
 tests/
 ├── support/       Mock wallet service and counterparty on a local relay

@@ -9,16 +9,7 @@ use crate::support::{Bugs, MockNetwork, MockWallet};
 #[tokio::main]
 async fn main() {
 	let buggy = std::env::args().any(|arg| arg == "--buggy");
-	let bugs = if buggy {
-		Bugs {
-			answer_expired: true,
-			wrong_error_code: true,
-			skip_p_tag: true,
-			wrong_preimage: true,
-		}
-	} else {
-		Bugs::default()
-	};
+	let bugs = if buggy { Bugs::all() } else { Bugs::default() };
 
 	let relay = MockRelay::run().await.expect("failed to start the local relay");
 	let uri = MockWallet::start(&relay, bugs, MockNetwork::default()).await;

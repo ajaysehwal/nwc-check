@@ -1,6 +1,7 @@
 mod discovery;
 mod encryption;
 mod errors;
+mod invoices;
 mod payments;
 mod response;
 mod safety;
@@ -142,16 +143,18 @@ pub enum Section {
 	Responses,
 	Errors,
 	Safety,
+	Invoices,
 	Payments,
 }
 
 impl Section {
-	pub const ALL: [Section; 6] = [
+	pub const ALL: [Section; 7] = [
 		Self::Discovery,
 		Self::Encryption,
 		Self::Responses,
 		Self::Errors,
 		Self::Safety,
+		Self::Invoices,
 		Self::Payments,
 	];
 
@@ -162,6 +165,7 @@ impl Section {
 			Self::Responses => "Responses",
 			Self::Errors => "Errors",
 			Self::Safety => "Safety",
+			Self::Invoices => "Invoices",
 			Self::Payments => "Payments",
 		}
 	}
@@ -173,6 +177,7 @@ impl Section {
 			Self::Responses => response::CHECKS,
 			Self::Errors => errors::CHECKS,
 			Self::Safety => safety::CHECKS,
+			Self::Invoices => invoices::CHECKS,
 			Self::Payments => payments::CHECKS,
 		}
 	}
@@ -184,6 +189,7 @@ impl Section {
 			Self::Responses => response::run(ctx).await,
 			Self::Errors => errors::run(ctx).await,
 			Self::Safety => safety::run(ctx).await,
+			Self::Invoices => invoices::run(ctx).await,
 			Self::Payments => payments::run(ctx).await,
 		}
 	}

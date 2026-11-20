@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use super::{Context, Payments, describe};
 use crate::check::{Check, Level, Outcome};
-use crate::counterparty::{from_hex, payment_hash};
+use crate::counterparty::{from_hex, sha256};
 use crate::wallet::Request;
 
 const MEMO: &str = "nwc-check";
@@ -98,7 +98,7 @@ async fn send(ctx: &Context, payments: &Payments) -> [Outcome; 2] {
 	let proof = match preimage {
 		None => PREIMAGE.fail(format!("no preimage, wallet {}", describe(&reply))),
 		Some(preimage) => match from_hex(preimage) {
-			Some(bytes) if payment_hash(&bytes) == invoice.payment_hash => {
+			Some(bytes) if sha256(&bytes) == invoice.payment_hash => {
 				PREIMAGE.pass("matches the payment hash")
 			}
 			Some(_) => PREIMAGE.fail("doesn't match the payment hash"),
