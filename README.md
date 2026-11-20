@@ -27,6 +27,7 @@ nwc-check run
 
 | Option | Description |
 |---|---|
+| `--config <PATH>` | Settings file (default `./nwc-check.toml` when it exists) |
 | `--network <NETWORK>` | Fail if the wallet reports a different network (`mainnet`, `testnet`, `signet`, `regtest`) |
 | `--only <IDS>` | Only report checks whose ID starts with one of these prefixes, e.g. `DISC,ENC-01` |
 | `--format <FORMAT>` | `text` (default) or `json` |
@@ -35,6 +36,36 @@ nwc-check run
 | `--no-color` | Disable colored output (`NO_COLOR` is also respected) |
 
 `nwc-check list` prints all checks.
+
+### Settings file
+
+Instead of passing options every time, keep them in `nwc-check.toml`:
+
+```sh
+nwc-check init                # write nwc-check.toml with every setting commented
+nwc-check init --polar alice  # fill in the counterparty from an LND node in Polar
+nwc-check run "nostr+walletconnect://..."
+```
+
+`run` reads `./nwc-check.toml` when it exists, or the file given by `--config` (or `NWC_CHECK_CONFIG`). Options on the command line override the file. The connection string is never stored in it.
+
+```toml
+timeout = 10
+network = "regtest"
+strict = false
+
+[lnd]
+url = "https://127.0.0.1:8082"
+macaroon = "~/.polar/networks/1/volumes/lnd/alice/data/chain/bitcoin/regtest/admin.macaroon"
+cert = "~/.polar/networks/1/volumes/lnd/alice/tls.cert"
+
+[spending]
+allow = true
+amount = 10
+max_sats = 100
+```
+
+Paths can be relative to the file or start with `~/`. Unknown keys are rejected, so a typo doesn't silently fall back to a default.
 
 ### Payment checks
 
@@ -143,6 +174,8 @@ Checks for methods or encryption schemes the wallet doesn't advertise are skippe
 src/
 ├── main.rs        Entry point: runs the stages and sets the exit code
 ├── cli.rs         Command-line arguments
+├── config.rs      nwc-check.toml: loading, merging with arguments, template
+├── polar.rs       Finds an LND node's URL, macaroon and cert in Polar
 ├── ui.rs          Terminal output: progress, sections, problems, summary
 ├── lib.rs
 ├── wallet.rs      Sends raw NIP-47 requests and decrypts replies
