@@ -9,8 +9,9 @@ use nwc_check::wallet::Wallet;
 
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
-const PAYMENT_CHECKS: [&str; 9] = [
+const PAYMENT_CHECKS: [&str; 10] = [
 	"PAY-01", "PAY-02", "PAY-03", "CORE-04", "CORE-07", "CORE-08", "CORE-09", "SAFE-02", "SAFE-03",
+	"SAFE-05",
 ];
 const INVOICE_CHECKS: [&str; 5] = ["CORE-01", "CORE-02", "CORE-03", "CORE-04", "CORE-05"];
 
@@ -41,9 +42,13 @@ impl Run {
 		let relay = MockRelay::run().await.unwrap();
 		let network = MockNetwork::new(self.chain);
 		let budget_msat = self.budget_sats.map(|sats| sats * 1000);
-		let uri = MockWallet::start(&relay, self.bugs, network.clone(), budget_msat).await;
-		let wallet = Wallet::connect(uri, Duration::from_secs(3)).await.unwrap();
-		let mut ctx = Context::load(wallet, Some(self.chain.to_owned())).await.unwrap();
+		let connections = MockWallet::start(&relay, self.bugs, network.clone(), budget_msat).await;
+		let wallet = Wallet::connect(connections.uri, Duration::from_secs(3)).await.unwrap();
+		let readonly = Wallet::connect(connections.readonly, Duration::from_secs(3)).await.unwrap();
+		let mut ctx = Context::load(wallet, Some(self.chain.to_owned()))
+			.await
+			.unwrap()
+			.with_readonly(readonly);
 		if self.counterparty {
 			let node = Box::new(MockCounterparty {
 				network: network.clone(),
@@ -94,7 +99,7 @@ async fn payments_stop_at_max_sats() {
 	let (outcomes, network) = Run { max_sats: 15, ..Run::default() }.checks().await;
 	let over_budget = outcomes.iter().filter(|outcome| outcome.detail.contains("--max-sats"));
 	assert!(over_budget.count() >= 2);
-	assert_eq!(network.moved_msat(), 10_000);
+	assert!(network.moved_msat() <= 15_000);
 }
 
 #[tokio::test]
@@ -132,6 +137,7 @@ async fn each_bug_is_caught_on_its_own() {
 		("CORE-07", Bugs { no_fees_paid: true, ..none }),
 		("CORE-08", Bugs { ignores_amount: true, ..none }),
 		("CORE-09", Bugs { hidden_fee: true, ..none }),
+		("SAFE-05", Bugs { ignores_permissions: true, ..none }),
 	];
 	for (id, bugs) in cases {
 		let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;

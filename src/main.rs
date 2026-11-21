@@ -66,12 +66,27 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 		.await
 		.context("failed to connect to the wallet's relays")?;
 	say(&|ui| ui.step(true, format!("Connected to {}", plural(relays.len(), "relay"))));
+	let readonly = match &args.readonly_uri {
+		Some(readonly) => {
+			let readonly = NostrWalletConnectUri::parse(readonly.trim())
+				.context("invalid read-only connection string")?;
+			let readonly = Wallet::connect(readonly, settings.timeout)
+				.await
+				.context("failed to connect to the read-only connection's relays")?;
+			say(&|ui| ui.step(true, "Connected the read-only connection"));
+			Some(readonly)
+		}
+		None => None,
+	};
 
 	ui.busy("Reading wallet info");
 	let mut ctx =
 		Context::load(wallet, settings.network.map(|network| network.as_str().to_owned()))
 			.await
 			.context("failed to query the wallet service")?;
+	if let Some(readonly) = readonly {
+		ctx = ctx.with_readonly(readonly);
+	}
 	if let Some(lnd) = &settings.lnd {
 		ctx = if settings.allow_spend {
 			ui.busy("Connecting to the counterparty node");
@@ -121,7 +136,7 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 		ui.busy(format!("Running checks {}/{total}", results.len()));
 	})
 	.await;
-	ctx.wallet.disconnect().await;
+	ctx.disconnect().await;
 	ui.finish();
 
 	let summary = Summary::of(&results);

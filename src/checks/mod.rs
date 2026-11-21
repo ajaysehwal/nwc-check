@@ -73,6 +73,7 @@ pub struct Context {
 	pub get_info: Result<Reply, WalletError>,
 	pub unknown_method: Result<Reply, WalletError>,
 	pub payments: Result<Payments, String>,
+	pub readonly: Option<Wallet>,
 }
 
 impl Context {
@@ -107,6 +108,7 @@ impl Context {
 			get_info,
 			unknown_method,
 			payments: Err(NO_COUNTERPARTY.to_owned()),
+			readonly: None,
 		})
 	}
 
@@ -122,6 +124,18 @@ impl Context {
 			_ => Ok(payments),
 		};
 		self
+	}
+
+	pub fn with_readonly(mut self, wallet: Wallet) -> Self {
+		self.readonly = Some(wallet);
+		self
+	}
+
+	pub async fn disconnect(self) {
+		if let Some(readonly) = self.readonly {
+			readonly.disconnect().await;
+		}
+		self.wallet.disconnect().await;
 	}
 
 	pub fn block_payments(mut self, reason: impl Into<String>) -> Self {

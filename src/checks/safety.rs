@@ -19,11 +19,18 @@ const DUPLICATE: Check = Check::new(
 	"Relays can deliver the same request twice, and a wallet that pays every copy pays twice.",
 );
 
-pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE];
+const READONLY: Check = Check::new(
+	"SAFE-05",
+	Level::Safety,
+	"A read-only connection can't pay",
+	"A connection the user granted no payment permission must never spend their funds.",
+);
+
+pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE, &READONLY];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	let (expired, duplicate) = tokio::join!(expired(ctx), duplicate(ctx));
-	vec![expired, duplicate]
+	let (expired, duplicate, readonly) = tokio::join!(expired(ctx), duplicate(ctx), readonly(ctx));
+	vec![expired, duplicate, readonly]
 }
 
 async fn expired(ctx: &Context) -> Outcome {
@@ -100,4 +107,38 @@ async fn settled_payments(ctx: &Context, payment_hash: &str) -> Result<usize, St
 		.filter(|tx| tx.get("payment_hash").and_then(Value::as_str) == Some(payment_hash))
 		.filter(|tx| state(tx) == "settled")
 		.count())
+}
+
+async fn readonly(ctx: &Context) -> Outcome {
+	let Some(readonly) = &ctx.readonly else {
+		return READONLY.skip("no read-only connection (see --readonly-uri)");
+	};
+	let payments = match &ctx.payments {
+		Ok(payments) => payments,
+		Err(reason) => return READONLY.skip(reason),
+	};
+	let invoice = match payments.node.create_invoice(payments.amount_msat, "nwc-check").await {
+		Ok(invoice) => invoice,
+		Err(error) => {
+			return READONLY.skip(format!("counterparty couldn't create an invoice: {error:#}"));
+		}
+	};
+	// A wallet that ignores permissions pays this invoice.
+	if let Err(reason) = payments.reserve(1) {
+		return READONLY.skip(reason);
+	}
+	let params = json!({ "invoice": invoice.bolt11 });
+	let reply = readonly.send(Request::new("pay_invoice", ctx.encryption()).params(params)).await;
+	match payments.node.paid_msat(&invoice.payment_hash).await {
+		Ok(Some(_)) => READONLY.fail("the read-only connection paid the invoice"),
+		Ok(None) => match &reply {
+			Ok(reply) if reply.error_code() == Some("RESTRICTED") => {
+				READONLY.pass("RESTRICTED, nothing paid")
+			}
+			other => {
+				READONLY.fail(format!("nothing paid, but expected RESTRICTED, {}", describe(other)))
+			}
+		},
+		Err(error) => READONLY.skip(format!("couldn't look up the invoice: {error:#}")),
+	}
 }
