@@ -9,7 +9,9 @@ use nwc_check::wallet::Wallet;
 
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
-const PAYMENT_CHECKS: [&str; 6] = ["PAY-01", "PAY-02", "PAY-03", "CORE-04", "SAFE-03", "SAFE-02"];
+const PAYMENT_CHECKS: [&str; 9] = [
+	"PAY-01", "PAY-02", "PAY-03", "CORE-04", "CORE-07", "CORE-08", "CORE-09", "SAFE-02", "SAFE-03",
+];
 const INVOICE_CHECKS: [&str; 5] = ["CORE-01", "CORE-02", "CORE-03", "CORE-04", "CORE-05"];
 
 struct Run {
@@ -28,8 +30,8 @@ impl Default for Run {
 			chain: "regtest",
 			counterparty: true,
 			broke_counterparty: false,
-			max_sats: 100,
-			budget_sats: Some(40),
+			max_sats: 1000,
+			budget_sats: Some(100),
 		}
 	}
 }
@@ -127,6 +129,9 @@ async fn each_bug_is_caught_on_its_own() {
 		("CORE-05", Bugs { unknown_invoice_error: true, ..none }),
 		("SAFE-03", Bugs { pays_duplicates: true, ..none }),
 		("SAFE-02", Bugs { racy_budget: true, ..none }),
+		("CORE-07", Bugs { no_fees_paid: true, ..none }),
+		("CORE-08", Bugs { ignores_amount: true, ..none }),
+		("CORE-09", Bugs { hidden_fee: true, ..none }),
 	];
 	for (id, bugs) in cases {
 		let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;
@@ -135,6 +140,11 @@ async fn each_bug_is_caught_on_its_own() {
 			.filter(|outcome| outcome.is_problem())
 			.map(|outcome| outcome.id)
 			.collect();
-		assert_eq!(failed, [id]);
+		assert_eq!(
+			failed,
+			[id],
+			"{:#?}",
+			outcomes.iter().filter(|o| o.is_problem()).collect::<Vec<_>>()
+		);
 	}
 }

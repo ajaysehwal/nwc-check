@@ -3,6 +3,7 @@ mod discovery;
 mod encryption;
 mod errors;
 mod invoices;
+mod ledger;
 mod payments;
 mod response;
 mod safety;
@@ -162,11 +163,12 @@ pub enum Section {
 	Safety,
 	Invoices,
 	Payments,
+	Ledger,
 	Budget,
 }
 
 impl Section {
-	pub const ALL: [Section; 8] = [
+	pub const ALL: [Section; 9] = [
 		Self::Discovery,
 		Self::Encryption,
 		Self::Responses,
@@ -174,6 +176,7 @@ impl Section {
 		Self::Safety,
 		Self::Invoices,
 		Self::Payments,
+		Self::Ledger,
 		Self::Budget,
 	];
 
@@ -186,6 +189,7 @@ impl Section {
 			Self::Safety => "Safety",
 			Self::Invoices => "Invoices",
 			Self::Payments => "Payments",
+			Self::Ledger => "Ledger",
 			Self::Budget => "Budget",
 		}
 	}
@@ -199,6 +203,7 @@ impl Section {
 			Self::Safety => safety::CHECKS,
 			Self::Invoices => invoices::CHECKS,
 			Self::Payments => payments::CHECKS,
+			Self::Ledger => ledger::CHECKS,
 			Self::Budget => budget::CHECKS,
 		}
 	}
@@ -212,6 +217,7 @@ impl Section {
 			Self::Safety => safety::run(ctx).await,
 			Self::Invoices => invoices::run(ctx).await,
 			Self::Payments => payments::run(ctx).await,
+			Self::Ledger => ledger::run(ctx).await,
 			Self::Budget => budget::run(ctx).await,
 		}
 	}
@@ -222,8 +228,8 @@ pub fn catalog() -> Vec<&'static Check> {
 }
 
 pub async fn run_by_section(ctx: &Context, mut on_section: impl FnMut(Section, Vec<Outcome>)) {
-	// Budget uses up the connection's budget, so it runs after every other section.
-	let (together, after) = Section::ALL.split_at(Section::ALL.len() - 1);
+	// Ledger compares balances and Budget uses up the budget, so each runs on its own at the end.
+	let (together, after) = Section::ALL.split_at(Section::ALL.len() - 2);
 	let mut pending: FuturesUnordered<_> = together
 		.iter()
 		.enumerate()
@@ -256,6 +262,12 @@ fn state(result: &serde_json::Value) -> &str {
 		None if result.get("settled_at").is_some_and(|at| !at.is_null()) => "settled",
 		None => "pending",
 	}
+}
+
+const OVER_BUDGET: &str = "the connection's budget is used up (QUOTA_EXCEEDED)";
+
+fn over_budget(reply: &Result<Reply, WalletError>) -> bool {
+	matches!(reply, Ok(reply) if reply.error_code() == Some("QUOTA_EXCEEDED"))
 }
 
 fn describe(reply: &Result<Reply, WalletError>) -> String {

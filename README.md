@@ -168,10 +168,15 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 | PAY-01 | MUST | make_invoice returns a payable invoice |
 | PAY-02 | MUST | pay_invoice delivers the payment |
 | PAY-03 | SAFETY | pay_invoice returns the matching preimage |
+| CORE-07 | SHOULD | pay_invoice reports plausible fees_paid |
+| CORE-08 | MUST | pay_invoice pays the amount given for an amountless invoice |
+| CORE-09 | SAFETY | Balance drops by the amount plus fees_paid |
 
-Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks, CORE-04, SAFE-02 and SAFE-03, which move funds, are skipped without a counterparty and `--allow-spend`, and on mainnet. Invoice checks decode the returned BOLT11 invoice rather than trusting the reply's fields.
+Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks, CORE-04, CORE-07 to CORE-09, SAFE-02 and SAFE-03, which move funds, are skipped without a counterparty and `--allow-spend`, and on mainnet. Invoice checks decode the returned BOLT11 invoice rather than trusting the reply's fields.
 
 SAFE-03 sends one signed `pay_invoice` event, then publishes the identical event again after the wallet replies, and counts settled payments for that hash with `list_transactions`. It reserves twice the payment amount from `--max-sats`, since a wallet with this bug pays twice. It's skipped when the relays don't pass the copy on.
+
+CORE-09 compares `get_balance` before and after one payment. It allows up to 1 sat of difference for wallets that round to whole sats. Payment checks are skipped, not failed, when the wallet refuses with `QUOTA_EXCEEDED`, since that means the connection's budget ran out.
 
 SAFE-02 reads the connection's remaining budget with `get_budget`, or from `--budget-sats` for wallets without it. It then sends five payments at once, sized so four fit the budget and five don't, and checks how much the counterparty actually received. It runs after every other check because it uses up the connection's budget, so use a connection with a small budget. The five payments together must fit under `--max-sats`.
 
@@ -198,6 +203,7 @@ src/
     ├── safety.rs
     ├── invoices.rs
     ├── payments.rs
+    ├── ledger.rs      Runs on its own after the others, since it compares balances
     └── budget.rs      Runs last, since it uses up the connection's budget
 tests/
 ├── support/       Mock wallet service and counterparty on a local relay
@@ -210,7 +216,7 @@ A run has three stages:
 
 1. **Connect.** `Wallet` connects to the relays in the connection string. It builds every request itself rather than going through an NWC client, so checks can control the encryption tag, signer and expiration of each request.
 2. **Load.** `Context` fetches the wallet's info event and the replies that several checks share, such as `get_info`, once.
-3. **Check.** Each section in `checks/` turns those replies, plus any requests of its own, into an `Outcome` per check. Sections run concurrently and are reported in a fixed order as they finish. Budget runs alone at the end.
+3. **Check.** Each section in `checks/` turns those replies, plus any requests of its own, into an `Outcome` per check. Sections run concurrently and are reported in a fixed order as they finish. Ledger and Budget then run one at a time.
 
 To add a check, declare it with `Check::new` in the module for its section, add it to that module's `CHECKS` list and return its outcome from the module's `run` function. Then add a mock wallet bug that the check must catch.
 

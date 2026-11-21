@@ -113,11 +113,14 @@ impl Counterparty for Lnd {
 		.boxed()
 	}
 
-	fn is_settled<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<bool>> {
+	fn paid_msat<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<Option<u64>>> {
 		async move {
 			let invoice: LookupInvoice =
 				self.get(&format!("/v1/invoice/{}", to_hex(payment_hash))).await?;
-			Ok(invoice.state == "SETTLED")
+			if invoice.state != "SETTLED" {
+				return Ok(None);
+			}
+			Ok(Some(invoice.amt_paid_msat.parse().context("LND returned an invalid amount")?))
 		}
 		.boxed()
 	}
@@ -184,6 +187,8 @@ struct AddInvoice {
 #[derive(Deserialize)]
 struct LookupInvoice {
 	state: String,
+	#[serde(default)]
+	amt_paid_msat: String,
 }
 
 #[derive(Deserialize)]
