@@ -140,12 +140,13 @@ async fn counterparty(lnd: &LndSettings, settings: &Settings) -> Result<Payments
 	let node = Lnd::new(&lnd.url, &lnd.macaroon, lnd.cert.as_deref(), Duration::from_secs(60))?;
 	node.check_access().await.context("the counterparty LND node can't be used")?;
 	let info = node.info().await.context("failed to query the counterparty LND node")?;
-	Ok(Payments::new(
+	let payments = Payments::new(
 		Box::new(node),
 		info.network,
 		settings.amount_sats * 1000,
 		settings.max_sats * 1000,
-	))
+	);
+	Ok(payments.with_wallet_budget(settings.budget_sats.map(|sats| sats * 1000)))
 }
 
 fn init(args: InitArgs) -> Result<ExitCode> {

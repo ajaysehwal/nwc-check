@@ -5,7 +5,7 @@ use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef};
 use nostr_sdk::prelude::Keys;
 use serde_json::{Value, json};
 
-use super::{Context, describe};
+use super::{Context, describe, state};
 use crate::check::{Check, Level, Outcome};
 use crate::counterparty::{sha256, to_hex};
 use crate::wallet::Request;
@@ -194,7 +194,7 @@ async fn settle(ctx: &Context) -> Outcome {
 		Ok(result) => return SETTLE.fail(format!("new invoice is {}", state(&result))),
 		Err(error) => return SETTLE.fail(error),
 	}
-	if let Err(reason) = payments.reserve() {
+	if let Err(reason) = payments.reserve(1) {
 		return SETTLE.skip(reason);
 	}
 	if let Err(error) = payments.node.pay(&invoice.to_string()).await {
@@ -241,13 +241,5 @@ async fn lookup_invoice(ctx: &Context, params: Value) -> Result<Value, String> {
 			reply.result().cloned().ok_or_else(|| "reply has no result".to_owned())
 		}
 		_ => Err(describe(&reply)),
-	}
-}
-
-fn state(result: &Value) -> &str {
-	match result.get("state").and_then(Value::as_str) {
-		Some(state) => state,
-		None if result.get("settled_at").is_some_and(|at| !at.is_null()) => "settled",
-		None => "pending",
 	}
 }

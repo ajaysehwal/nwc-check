@@ -9,7 +9,7 @@ use nwc_check::wallet::Wallet;
 
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
-const PAYMENT_CHECKS: [&str; 4] = ["PAY-01", "PAY-02", "PAY-03", "CORE-04"];
+const PAYMENT_CHECKS: [&str; 6] = ["PAY-01", "PAY-02", "PAY-03", "CORE-04", "SAFE-03", "SAFE-02"];
 const INVOICE_CHECKS: [&str; 5] = ["CORE-01", "CORE-02", "CORE-03", "CORE-04", "CORE-05"];
 
 struct Run {
@@ -18,6 +18,7 @@ struct Run {
 	counterparty: bool,
 	broke_counterparty: bool,
 	max_sats: u64,
+	budget_sats: Option<u64>,
 }
 
 impl Default for Run {
@@ -28,6 +29,7 @@ impl Default for Run {
 			counterparty: true,
 			broke_counterparty: false,
 			max_sats: 100,
+			budget_sats: Some(40),
 		}
 	}
 }
@@ -36,7 +38,8 @@ impl Run {
 	async fn checks(self) -> (Vec<Outcome>, MockNetwork) {
 		let relay = MockRelay::run().await.unwrap();
 		let network = MockNetwork::new(self.chain);
-		let uri = MockWallet::start(&relay, self.bugs, network.clone()).await;
+		let budget_msat = self.budget_sats.map(|sats| sats * 1000);
+		let uri = MockWallet::start(&relay, self.bugs, network.clone(), budget_msat).await;
 		let wallet = Wallet::connect(uri, Duration::from_secs(3)).await.unwrap();
 		let mut ctx = Context::load(wallet, Some(self.chain.to_owned())).await.unwrap();
 		if self.counterparty {
@@ -114,7 +117,7 @@ async fn buggy_wallet_is_caught() {
 }
 
 #[tokio::test]
-async fn each_invoice_bug_is_caught_on_its_own() {
+async fn each_bug_is_caught_on_its_own() {
 	let none = Bugs::default();
 	let cases = [
 		("CORE-01", Bugs { wrong_amount: true, ..none }),
@@ -122,6 +125,8 @@ async fn each_invoice_bug_is_caught_on_its_own() {
 		("CORE-03", Bugs { lookup_by_hash_only: true, ..none }),
 		("CORE-04", Bugs { never_settles: true, ..none }),
 		("CORE-05", Bugs { unknown_invoice_error: true, ..none }),
+		("SAFE-03", Bugs { pays_duplicates: true, ..none }),
+		("SAFE-02", Bugs { racy_budget: true, ..none }),
 	];
 	for (id, bugs) in cases {
 		let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;

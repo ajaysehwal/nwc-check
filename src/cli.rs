@@ -89,6 +89,10 @@ pub struct CounterpartyArgs {
 	/// Most sats all payments in a run may move together (default 100)
 	#[arg(long, value_name = "SATS")]
 	pub max_sats: Option<u64>,
+
+	/// Remaining budget of the connection, for wallets without get_budget
+	#[arg(long, value_name = "SATS")]
+	pub budget_sats: Option<u64>,
 }
 
 #[derive(clap::Args)]

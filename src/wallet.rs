@@ -1,13 +1,19 @@
 use std::fmt;
+use std::pin::Pin;
 use std::time::Duration;
 
+use futures::Stream;
 use nostr::nips::nip47::NostrWalletConnectUri;
 use nostr::nips::{nip04, nip44};
+use nostr_sdk::prelude::RelayUrl;
 use nostr_sdk::prelude::{
 	Client, Event, EventBuilder, EventId, Filter, FinalizeEvent, Keys, Kind, PublicKey,
 	ReqExitPolicy, SecretKey, StreamExt, Tag, Timestamp,
 };
 use serde_json::{Value, json};
+
+type Responses =
+	Pin<Box<dyn Stream<Item = (RelayUrl, Result<Event, nostr_sdk::error::Error>)> + Send>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scheme {
@@ -143,6 +149,17 @@ fn relay_error(error: impl fmt::Display) -> WalletError {
 	WalletError::Relay(error.to_string())
 }
 
+pub struct Signed {
+	event: Event,
+	scheme: Scheme,
+	signer: Keys,
+}
+
+pub struct Redelivery {
+	pub echoed: bool,
+	pub reply: Option<Reply>,
+}
+
 pub struct Wallet {
 	client: Client,
 	uri: NostrWalletConnectUri,
@@ -180,37 +197,69 @@ impl Wallet {
 	}
 
 	pub async fn send(&self, request: Request) -> Result<Reply, WalletError> {
-		let signer = request.signer.as_ref().unwrap_or(&self.keys);
-		let event = self.build_event(&request, signer)?;
+		self.deliver(&self.sign(request)?).await
+	}
 
-		let filter = Filter::new()
-			.kind(Kind::WalletConnectResponse)
-			.author(self.uri.public_key)
-			.event(event.id);
-		let mut stream = self
+	pub fn sign(&self, request: Request) -> Result<Signed, WalletError> {
+		let signer = request.signer.clone().unwrap_or_else(|| self.keys.clone());
+		let event = self.build_event(&request, &signer)?;
+		Ok(Signed { event, scheme: request.encryption.scheme(), signer })
+	}
+
+	pub async fn deliver(&self, signed: &Signed) -> Result<Reply, WalletError> {
+		let mut replies = self.replies(signed).await?;
+		self.publish(signed).await?;
+		let (_, response) = replies.next().await.ok_or(WalletError::NoReply)?;
+		self.open(signed, response.map_err(relay_error)?)
+	}
+
+	pub async fn redeliver(&self, signed: &Signed) -> Result<Redelivery, WalletError> {
+		let mut echoes = self
 			.client
-			.stream_events(filter)
+			.stream_events(Filter::new().id(signed.event.id))
 			.timeout(self.timeout)
 			.policy(ReqExitPolicy::WaitForEvents(1))
 			.await
 			.map_err(relay_error)?;
+		let mut replies = self.replies(signed).await?;
+		self.publish(signed).await?;
+		let (echo, reply) = tokio::join!(echoes.next(), replies.next());
+		let reply = match reply {
+			Some((_, response)) => Some(self.open(signed, response.map_err(relay_error)?)?),
+			None => None,
+		};
+		Ok(Redelivery { echoed: echo.is_some(), reply })
+	}
 
-		let output = self.client.send_event(&event).await.map_err(relay_error)?;
+	async fn replies(&self, signed: &Signed) -> Result<Responses, WalletError> {
+		let filter = Filter::new()
+			.kind(Kind::WalletConnectResponse)
+			.author(self.uri.public_key)
+			.event(signed.event.id);
+		self.client
+			.stream_events(filter)
+			.timeout(self.timeout)
+			.policy(ReqExitPolicy::WaitForEvents(1))
+			.await
+			.map_err(relay_error)
+	}
+
+	async fn publish(&self, signed: &Signed) -> Result<(), WalletError> {
+		let output = self.client.send_event(&signed.event).await.map_err(relay_error)?;
 		if output.success.is_empty() {
 			let reasons: Vec<String> = output.failed.into_values().collect();
 			return Err(WalletError::Rejected(reasons.join("; ")));
 		}
+		Ok(())
+	}
 
-		let (_, response) = stream.next().await.ok_or(WalletError::NoReply)?;
-		let response = response.map_err(relay_error)?;
-		let (scheme, plaintext) =
-			decrypt(signer.secret_key(), &response, request.encryption.scheme())?;
+	fn open(&self, signed: &Signed, response: Event) -> Result<Reply, WalletError> {
+		let (scheme, plaintext) = decrypt(signed.signer.secret_key(), &response, signed.scheme)?;
 		let body = serde_json::from_str(&plaintext)
 			.map_err(|error| WalletError::InvalidJson(error.to_string()))?;
-
 		Ok(Reply {
-			request_id: event.id,
-			client: signer.public_key(),
+			request_id: signed.event.id,
+			client: signed.signer.public_key(),
 			event: response,
 			scheme,
 			body,

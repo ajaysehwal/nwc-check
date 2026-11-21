@@ -54,7 +54,7 @@ async fn receive(ctx: &Context, payments: &Payments) -> Outcome {
 	let Some(invoice) = invoice else {
 		return RECEIVE.fail("reply has no invoice");
 	};
-	if let Err(reason) = payments.reserve() {
+	if let Err(reason) = payments.reserve(1) {
 		return RECEIVE.skip(reason);
 	}
 	match payments.node.pay(invoice).await {
@@ -81,7 +81,7 @@ async fn send(ctx: &Context, payments: &Payments) -> [Outcome; 2] {
 		}
 	};
 
-	if let Err(reason) = payments.reserve() {
+	if let Err(reason) = payments.reserve(1) {
 		return [SEND.skip(&reason), PREIMAGE.skip(reason)];
 	}
 	let params = json!({ "invoice": invoice.bolt11 });
