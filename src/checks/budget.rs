@@ -2,7 +2,7 @@ use futures::future::join_all;
 use serde_json::{Value, json};
 
 use super::{Context, Payments, describe};
-use crate::check::{Check, Level, Outcome};
+use crate::check::{Check, Level, Outcome, Spec};
 use crate::wallet::Request;
 
 const PAYMENTS: u64 = 5;
@@ -10,6 +10,7 @@ const PAYMENTS: u64 = 5;
 const RACE: Check = Check::new(
 	"SAFE-02",
 	Level::Safety,
+	Spec::Safety,
 	"Concurrent payments stay within the budget",
 	"A wallet that checks the budget before reserving it can overspend when payments arrive together.",
 );

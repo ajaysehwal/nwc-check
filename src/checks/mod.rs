@@ -228,6 +228,14 @@ impl Section {
 	}
 
 	async fn run(self, ctx: &Context) -> Vec<Outcome> {
+		let mut outcomes = self.outcomes(ctx).await;
+		for outcome in &mut outcomes {
+			outcome.section = self.title();
+		}
+		outcomes
+	}
+
+	async fn outcomes(self, ctx: &Context) -> Vec<Outcome> {
 		match self {
 			Self::Discovery => discovery::run(ctx).await,
 			Self::Encryption => encryption::run(ctx).await,

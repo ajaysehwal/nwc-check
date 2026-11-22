@@ -138,6 +138,8 @@ Then pass the printed connection string to `nwc-check run` in another terminal.
 
 Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` problems are warnings. `SAFETY` checks cover behavior the spec doesn't require but that protects funds.
 
+Each check also names the spec it comes from, pinned to the commit it was written against: NIP-47 [`c53877571f96`](https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md), NIP-40 [`f5a15ea27e06`](https://github.com/nostr-protocol/nips/blob/f5a15ea27e06/40.md) or NWC-13 [`36ab132bbce1`](https://github.com/nostr-wallet-connect/nwc/blob/36ab132bbce1/13.md). SAFE-02, SAFE-03 and SAFE-04 have none. The spec appears in `nwc-check list`, in the JSON `spec` field, and under each problem in the text output.
+
 | ID | Level | Check |
 |---|---|---|
 | DISC-01 | MUST | Info event is published |
@@ -202,7 +204,7 @@ src/
 ├── ui.rs          Terminal output: progress, sections, problems, summary
 ├── lib.rs
 ├── wallet.rs      Sends raw NIP-47 requests and decrypts replies
-├── check.rs       Check, Level, Status, Outcome and Summary types
+├── check.rs       Check, Level, Spec, Status, Outcome and Summary types
 ├── report.rs      JSON report
 ├── counterparty/  Node that pays and gets paid by the wallet (Counterparty trait, LND client)
 └── checks/

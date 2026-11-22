@@ -2,19 +2,21 @@ use nostr_sdk::prelude::Timestamp;
 use serde_json::{Value, json};
 
 use super::{Context, OVER_BUDGET, describe, over_budget, state};
-use crate::check::{Check, Level, Outcome};
+use crate::check::{Check, Level, Outcome, Spec};
 use crate::counterparty::to_hex;
 use crate::wallet::{Request, WalletError};
 
 const EXPIRED: Check = Check::new(
 	"SAFE-01",
 	Level::Safety,
+	Spec::Nip40,
 	"Expired requests are ignored",
 	"An expired payment request could be paid long after the user gave up on it.",
 );
 const DUPLICATE: Check = Check::new(
 	"SAFE-03",
 	Level::Safety,
+	Spec::Safety,
 	"A duplicated pay_invoice is paid once",
 	"Relays can deliver the same request twice, and a wallet that pays every copy pays twice.",
 );
@@ -22,6 +24,7 @@ const DUPLICATE: Check = Check::new(
 const READONLY: Check = Check::new(
 	"SAFE-05",
 	Level::Safety,
+	Spec::Nip47,
 	"A read-only connection can't pay",
 	"A connection the user granted no payment permission must never spend their funds.",
 );
@@ -29,6 +32,7 @@ const READONLY: Check = Check::new(
 const OVERRIDE: Check = Check::new(
 	"SAFE-04",
 	Level::Safety,
+	Spec::Safety,
 	"amount can't change a fixed-amount invoice",
 	"A wallet that pays the amount param instead of the invoice amount can be made to overpay.",
 );

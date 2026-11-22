@@ -90,6 +90,9 @@ impl Ui {
 				style("Why  ").dim(),
 				problem.why,
 			));
+			if let Some(url) = problem.spec.url() {
+				out.push_str(&format!("\n    {}  {}", style("Spec ").dim(), url));
+			}
 		}
 		self.print(out);
 	}
@@ -123,15 +126,19 @@ impl Ui {
 }
 
 pub fn catalog() -> String {
+	let width =
+		checks::catalog().iter().map(|check| check.title.chars().count()).max().unwrap_or(0);
 	let mut out = String::new();
 	for section in Section::ALL {
 		out.push_str(&format!("{}\n", style(section.title()).bold()));
 		for check in section.checks() {
+			let spec = check.spec.id().unwrap_or("safety, no spec");
 			out.push_str(&format!(
-				"  {:<8} {}  {}\n",
+				"  {:<8} {}  {:<width$}  {}\n",
 				check.id,
 				level_badge(check.level),
-				check.title
+				check.title,
+				style(spec).dim(),
 			));
 		}
 		out.push('\n');

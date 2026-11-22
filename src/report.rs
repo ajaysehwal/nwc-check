@@ -35,3 +35,26 @@ impl Report {
 		serde_json::to_string_pretty(self).unwrap_or_default()
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::check::{Check, Level, Spec};
+
+	const PINNED: Check = Check::new("T-01", Level::Must, Spec::Nip47, "Pinned", "Why.");
+	const UNSPECIFIED: Check = Check::new("T-02", Level::Safety, Spec::Safety, "Unpinned", "Why.");
+
+	fn report() -> Report {
+		let mut results = vec![PINNED.pass("ok"), UNSPECIFIED.fail("bad")];
+		results.iter_mut().for_each(|outcome| outcome.section = "Tests");
+		Report::new("wallet".to_owned(), vec!["wss://relay".to_owned()], 5, results)
+	}
+
+	#[test]
+	fn json_cites_the_spec_and_section() {
+		let json: serde_json::Value = serde_json::from_str(&report().to_json()).unwrap();
+		assert_eq!(json["results"][0]["spec"], "nip47@c53877571f96");
+		assert_eq!(json["results"][0]["section"], "Tests");
+		assert!(json["results"][1]["spec"].is_null());
+	}
+}
