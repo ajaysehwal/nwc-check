@@ -2,18 +2,21 @@ use serde_json::{Value, json};
 
 use super::payments::result_field;
 use super::{Context, Payments, describe};
-use crate::check::{Check, Level, Outcome};
+use crate::check::{Check, Level, Outcome, Spec};
+use crate::evidence::track;
 use crate::wallet::Request;
 
 const BALANCE: Check = Check::new(
 	"CORE-09",
 	Level::Safety,
+	Spec::Nip47,
 	"Balance drops by the amount plus fees_paid",
 	"A wallet that charges more than it reports takes money the user can't see.",
 );
 const BUDGET_USE: Check = Check::new(
 	"EXT13-04",
 	Level::Safety,
+	Spec::Nwc13,
 	"used_budget rises by the amount plus fees_paid",
 	"A budget that leaves out fees lets a connection spend more than the user allowed.",
 );
@@ -31,7 +34,8 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 	if !ctx.supports("pay_invoice") {
 		return skip_all("pay_invoice not advertised");
 	}
-	match pay_once(ctx, payments).await {
+	let (paid, evidence) = track(pay_once(ctx, payments)).await;
+	let outcomes = match paid {
 		Ok(Paid { fees, balance, budget }) => {
 			let expected = payments.amount_msat + fees;
 			vec![
@@ -56,7 +60,8 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 			]
 		}
 		Err(reason) => skip_all(&reason),
-	}
+	};
+	outcomes.into_iter().map(|outcome| outcome.with(&evidence)).collect()
 }
 
 struct Paid {

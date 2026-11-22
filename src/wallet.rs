@@ -1,6 +1,6 @@
 use std::fmt;
 use std::pin::Pin;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::Stream;
 use nostr::nips::nip47::NostrWalletConnectUri;
@@ -11,6 +11,8 @@ use nostr_sdk::prelude::{
 	ReqExitPolicy, SecretKey, StreamExt, Tag, Timestamp,
 };
 use serde_json::{Value, json};
+
+use crate::evidence::{self, Exchange};
 
 type Responses =
 	Pin<Box<dyn Stream<Item = (RelayUrl, Result<Event, nostr_sdk::error::Error>)> + Send>>;
@@ -210,6 +212,13 @@ impl Wallet {
 	}
 
 	pub async fn deliver(&self, signed: &Signed) -> Result<Reply, WalletError> {
+		let started = Instant::now();
+		let reply = self.exchange(signed).await;
+		self.record(signed, reply.as_ref().ok(), started);
+		reply
+	}
+
+	async fn exchange(&self, signed: &Signed) -> Result<Reply, WalletError> {
 		let mut replies = self.replies(signed).await?;
 		// Replies without an e tag never match the filter above, so watch for them separately.
 		let mut untagged = self
@@ -246,6 +255,23 @@ impl Wallet {
 	}
 
 	pub async fn redeliver(&self, signed: &Signed) -> Result<Redelivery, WalletError> {
+		let started = Instant::now();
+		let redelivery = self.echo(signed).await;
+		let reply = redelivery.as_ref().ok().and_then(|redelivery| redelivery.reply.as_ref());
+		self.record(signed, reply, started);
+		redelivery
+	}
+
+	fn record(&self, signed: &Signed, reply: Option<&Reply>, started: Instant) {
+		evidence::record(Exchange {
+			method: signed.method.clone(),
+			request: signed.event.id.to_hex(),
+			reply: reply.map(|reply| reply.event.id.to_hex()),
+			ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+		});
+	}
+
+	async fn echo(&self, signed: &Signed) -> Result<Redelivery, WalletError> {
 		let mut echoes = self
 			.client
 			.stream_events(Filter::new().id(signed.event.id))

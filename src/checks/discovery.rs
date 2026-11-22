@@ -2,42 +2,48 @@ use nostr_sdk::prelude::Timestamp;
 use serde_json::Value;
 
 use super::{Context, describe};
-use crate::check::{Check, Level, Outcome};
+use crate::check::{Check, Level, Outcome, Spec};
 use crate::wallet::Scheme;
 
 const INFO_EVENT: Check = Check::new(
 	"DISC-01",
 	Level::Must,
+	Spec::Nip47,
 	"Info event is published",
 	"Apps learn what the wallet supports from this event.",
 );
 const METHODS: Check = Check::new(
 	"DISC-02",
 	Level::Must,
+	Spec::Nip47,
 	"Info event lists methods",
 	"Without it, apps can't tell which requests the wallet accepts.",
 );
 const NIP44: Check = Check::new(
 	"DISC-03",
 	Level::Should,
+	Spec::Nip47,
 	"NIP-44 encryption is advertised",
 	"NIP-04 is deprecated; NIP-44 is the encryption clients should use.",
 );
 const GET_INFO_METHODS: Check = Check::new(
 	"DISC-04",
 	Level::Should,
+	Spec::Nip47,
 	"get_info methods match the info event",
 	"Apps may call methods the wallet never advertised.",
 );
 const NETWORK: Check = Check::new(
 	"DISC-05",
 	Level::Must,
+	Spec::Nip47,
 	"get_info reports a valid network",
 	"Apps check the network so they never pay on the wrong chain.",
 );
 const EXTENSIONS: Check = Check::new(
 	"DISC-06",
 	Level::Should,
+	Spec::Nip47,
 	"Extensions match between info event and get_info",
 	"Apps rely on extensions being advertised the same way in both places.",
 );
@@ -54,7 +60,7 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 			METHODS.skip("no info event"),
 			NIP44.skip("no info event"),
 			GET_INFO_METHODS.skip("no info event"),
-			network(ctx),
+			network(ctx).citing(&ctx.shared("get_info")),
 			EXTENSIONS.skip("no info event"),
 		];
 	};
@@ -71,9 +77,9 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 		INFO_EVENT.pass(format!("published {}", age(info.created_at))),
 		METHODS.verdict(!ctx.methods.is_empty(), list_or("methods", &ctx.methods)),
 		NIP44.verdict(ctx.advertises(Scheme::Nip44), list_or("encryption", &ctx.schemes)),
-		get_info_methods(ctx),
-		network(ctx),
-		extensions(ctx, &info_extensions),
+		get_info_methods(ctx).citing(&ctx.shared("get_info")),
+		network(ctx).citing(&ctx.shared("get_info")),
+		extensions(ctx, &info_extensions).citing(&ctx.shared("get_info")),
 	]
 }
 

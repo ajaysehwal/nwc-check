@@ -1,36 +1,41 @@
 use serde_json::Value;
 
-use super::{Context, describe};
-use crate::check::{Check, Level, Outcome};
+use super::{Context, describe, tracked};
+use crate::check::{Check, Level, Outcome, Spec};
 use crate::wallet::{Reply, Request, WalletError};
 
 const RESULT_TYPE: Check = Check::new(
 	"RESP-01",
 	Level::Must,
+	Spec::Nip47,
 	"result_type matches the method",
 	"Clients match a reply to its method by result_type.",
 );
 const NULL_ERROR: Check = Check::new(
 	"RESP-02",
 	Level::Must,
+	Spec::Nip47,
 	"Successful reply has a null error",
 	"A non-null error makes clients treat a success as a failure.",
 );
 const ERROR_SHAPE: Check = Check::new(
 	"RESP-03",
 	Level::Must,
+	Spec::Nip47,
 	"Error has a code and a message",
 	"Clients show the message to users and act on the code.",
 );
 const TAGS: Check = Check::new(
 	"RESP-04",
 	Level::Should,
+	Spec::Nip47,
 	"Reply references the request and client",
 	"Without e and p tags, clients can't match replies to their requests.",
 );
 const BALANCE: Check = Check::new(
 	"RESP-05",
 	Level::Must,
+	Spec::Nip47,
 	"get_balance returns a balance in msats",
 	"Apps show this balance to users.",
 );
@@ -38,7 +43,14 @@ const BALANCE: Check = Check::new(
 pub const CHECKS: &[&Check] = &[&RESULT_TYPE, &NULL_ERROR, &ERROR_SHAPE, &TAGS, &BALANCE];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	vec![result_type(ctx), null_error(ctx), error_shape(ctx), tags(ctx), balance(ctx).await]
+	let get_info = ctx.shared("get_info");
+	vec![
+		result_type(ctx).citing(&get_info),
+		null_error(ctx).citing(&get_info),
+		error_shape(ctx).citing(&get_info),
+		tags(ctx).citing(&get_info),
+		tracked(balance(ctx)).await,
+	]
 }
 
 fn result_type(ctx: &Context) -> Outcome {

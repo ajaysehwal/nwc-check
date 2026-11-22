@@ -4,6 +4,7 @@ mod polar;
 mod ui;
 
 use std::io::IsTerminal;
+use std::path::Path;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -28,7 +29,7 @@ async fn main() -> ExitCode {
 			Ok(ExitCode::SUCCESS)
 		}
 		Command::Init(args) => init(args),
-		Command::Run(args) => run(args).await,
+		Command::Run(args) => run(*args).await,
 	};
 	result.unwrap_or_else(|error| {
 		eprintln!("{} {error:#}", console::style("error:").red().bold());
@@ -46,7 +47,7 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	let wallet_key = uri.public_key.to_hex();
 	let relays: Vec<String> = uri.relays.iter().map(ToString::to_string).collect();
 
-	let text = matches!(args.format, Format::Text);
+	let text = matches!(args.format, Format::Text | Format::Html);
 	let no_color = args.no_color || std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
 	let terminal = std::io::stdout().is_terminal();
 	let ui = Ui::new(text && terminal && !no_color, text && terminal);
@@ -147,12 +148,29 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	ui.finish();
 
 	let summary = Summary::of(&results);
+	let elapsed = started.elapsed();
+	let report = || {
+		Report::new(
+			wallet_key.clone(),
+			relays.clone(),
+			elapsed.as_millis(),
+			settings.strict,
+			results.clone(),
+		)
+	};
 	if text {
 		ui.problems(&results);
-		ui.summary(&summary, started.elapsed(), settings.strict);
-	} else {
-		let report = Report::new(wallet_key, relays, started.elapsed().as_millis(), results);
-		ui::write_stdout(&format!("{}\n", report.to_json()));
+		ui.summary(&summary, elapsed, settings.strict);
+	}
+	match args.format {
+		Format::Text => {}
+		Format::Json => write_report(args.output.as_deref(), &format!("{}\n", report().to_json()))?,
+		Format::Html => {
+			let path = args.output.as_deref().unwrap_or(Path::new(DEFAULT_HTML));
+			write_report(Some(path), &report().to_html())?;
+			ui.saved("HTML report", path);
+		}
+		Format::Junit => write_report(args.output.as_deref(), &report().to_junit())?,
 	}
 
 	Ok(exit_code(&summary, settings.strict))
@@ -189,6 +207,25 @@ fn init(args: InitArgs) -> Result<ExitCode> {
 	);
 	ui::write_stdout(&out);
 	Ok(ExitCode::SUCCESS)
+}
+
+const DEFAULT_HTML: &str = "nwc-check-report.html";
+
+fn write_report(path: Option<&Path>, contents: &str) -> Result<()> {
+	match path {
+		Some(path) => {
+			if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+				std::fs::create_dir_all(parent)
+					.with_context(|| format!("failed to create {}", parent.display()))?;
+			}
+			std::fs::write(path, contents)
+				.with_context(|| format!("failed to write the report to {}", path.display()))
+		}
+		None => {
+			ui::write_stdout(contents);
+			Ok(())
+		}
+	}
 }
 
 fn selected(only: &[String], id: &str) -> bool {

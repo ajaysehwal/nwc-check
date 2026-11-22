@@ -1,8 +1,8 @@
 use futures::future::join_all;
 use serde_json::{Value, json};
 
-use super::{Context, Payments, describe};
-use crate::check::{Check, Level, Outcome};
+use super::{Context, Payments, describe, tracked};
+use crate::check::{Check, Level, Outcome, Spec};
 use crate::wallet::Request;
 
 const PAYMENTS: u64 = 5;
@@ -10,6 +10,7 @@ const PAYMENTS: u64 = 5;
 const RACE: Check = Check::new(
 	"SAFE-02",
 	Level::Safety,
+	Spec::Safety,
 	"Concurrent payments stay within the budget",
 	"A wallet that checks the budget before reserving it can overspend when payments arrive together.",
 );
@@ -17,7 +18,7 @@ const RACE: Check = Check::new(
 pub const CHECKS: &[&Check] = &[&RACE];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	vec![race(ctx).await]
+	vec![tracked(race(ctx)).await]
 }
 
 async fn race(ctx: &Context) -> Outcome {

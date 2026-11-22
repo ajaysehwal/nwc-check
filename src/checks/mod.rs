@@ -17,6 +17,7 @@ use nostr_sdk::prelude::Event;
 
 use crate::check::{Check, Outcome};
 use crate::counterparty::Counterparty;
+use crate::evidence::{Evidence, Exchange, track};
 use crate::wallet::{Encryption, Reply, Request, Scheme, Wallet, WalletError};
 
 pub const UNKNOWN_METHOD: &str = "nwc_check_unknown_method";
@@ -75,6 +76,7 @@ pub struct Context {
 	pub unknown_method: Result<Reply, WalletError>,
 	pub payments: Result<Payments, String>,
 	pub readonly: Option<Wallet>,
+	shared: Vec<Exchange>,
 }
 
 impl Context {
@@ -95,10 +97,13 @@ impl Context {
 			.unwrap_or_default();
 
 		let encryption = preferred_encryption(&schemes);
-		let (get_info, unknown_method) = tokio::join!(
-			wallet.send(Request::new("get_info", encryption)),
-			wallet.send(Request::new(UNKNOWN_METHOD, encryption)),
-		);
+		let ((get_info, unknown_method), evidence) = track(async {
+			tokio::join!(
+				wallet.send(Request::new("get_info", encryption)),
+				wallet.send(Request::new(UNKNOWN_METHOD, encryption)),
+			)
+		})
+		.await;
 
 		Ok(Self {
 			wallet,
@@ -110,6 +115,7 @@ impl Context {
 			unknown_method,
 			payments: Err(NO_COUNTERPARTY.to_owned()),
 			readonly: None,
+			shared: evidence.exchanges,
 		})
 	}
 
@@ -146,6 +152,11 @@ impl Context {
 
 	pub fn network(&self) -> Option<&str> {
 		self.get_info.as_ref().ok()?.result()?.get("network")?.as_str()
+	}
+
+	/// Exchanges made while loading that several checks rely on, such as get_info.
+	pub fn shared(&self, method: &str) -> Vec<Exchange> {
+		self.shared.iter().filter(|exchange| exchange.method == method).cloned().collect()
 	}
 
 	pub fn supports(&self, method: &str) -> bool {
@@ -228,6 +239,14 @@ impl Section {
 	}
 
 	async fn run(self, ctx: &Context) -> Vec<Outcome> {
+		let mut outcomes = self.outcomes(ctx).await;
+		for outcome in &mut outcomes {
+			outcome.section = self.title();
+		}
+		outcomes
+	}
+
+	async fn outcomes(self, ctx: &Context) -> Vec<Outcome> {
 		match self {
 			Self::Discovery => discovery::run(ctx).await,
 			Self::Encryption => encryption::run(ctx).await,
@@ -274,6 +293,35 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 	let mut all = Vec::new();
 	run_by_section(ctx, |_, outcomes| all.extend(outcomes)).await;
 	all
+}
+
+/// Something a check function returns, so its evidence can be attached to every outcome in it.
+trait Attach {
+	fn attach(self, evidence: &Evidence) -> Self;
+}
+
+impl Attach for Outcome {
+	fn attach(self, evidence: &Evidence) -> Self {
+		self.with(evidence)
+	}
+}
+
+impl<const N: usize> Attach for [Outcome; N] {
+	fn attach(self, evidence: &Evidence) -> Self {
+		self.map(|outcome| outcome.with(evidence))
+	}
+}
+
+impl Attach for Vec<Outcome> {
+	fn attach(self, evidence: &Evidence) -> Self {
+		self.into_iter().map(|outcome| outcome.with(evidence)).collect()
+	}
+}
+
+/// Runs a check function and attaches the exchanges it made to its outcomes.
+async fn tracked<T: Attach>(future: impl Future<Output = T>) -> T {
+	let (outcomes, evidence) = track(future).await;
+	outcomes.attach(&evidence)
 }
 
 fn state(result: &serde_json::Value) -> &str {

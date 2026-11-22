@@ -182,7 +182,7 @@ mod tests {
 	fn args(extra: &[&str]) -> RunArgs {
 		let argv = ["nwc-check", "run", "nostr+walletconnect://x"].iter().chain(extra);
 		match Cli::try_parse_from(argv).unwrap().command {
-			Command::Run(args) => args,
+			Command::Run(args) => *args,
 			_ => unreachable!(),
 		}
 	}

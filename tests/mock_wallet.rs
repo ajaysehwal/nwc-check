@@ -113,6 +113,32 @@ async fn counterparty_without_funds_isnt_blamed_on_the_wallet() {
 }
 
 #[tokio::test]
+async fn evidence_names_each_checks_requests() {
+	let (outcomes, _) = Run::default().checks().await;
+	let find = |id: &str| outcomes.iter().find(|outcome| outcome.id == id).unwrap();
+
+	let nip44 = find("ENC-01");
+	assert_eq!(nip44.evidence.len(), 1);
+	assert_eq!(nip44.evidence[0].method, "get_info");
+	assert!(nip44.evidence[0].reply.is_some());
+	assert!(nip44.duration_ms.is_some());
+
+	let result_type = find("RESP-01");
+	assert_eq!(result_type.evidence.len(), 1);
+	assert_eq!(result_type.evidence[0].method, "get_info");
+
+	let duplicate = find("SAFE-03");
+	let payments: Vec<_> =
+		duplicate.evidence.iter().filter(|exchange| exchange.method == "pay_invoice").collect();
+	assert_eq!(payments.len(), 2);
+	assert_eq!(payments[0].request, payments[1].request);
+
+	let info_event = find("DISC-01");
+	assert!(info_event.evidence.is_empty());
+	assert!(info_event.duration_ms.is_none());
+}
+
+#[tokio::test]
 async fn reply_without_e_tag_is_reported() {
 	let bugs = Bugs { skip_e_tag: true, ..Bugs::default() };
 	let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;

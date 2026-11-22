@@ -2,7 +2,8 @@ use nostr_sdk::prelude::Timestamp;
 use serde_json::{Map, Value};
 
 use super::{Context, describe};
-use crate::check::{Check, Level, Outcome};
+use crate::check::{Check, Level, Outcome, Spec};
+use crate::evidence::track;
 use crate::wallet::Request;
 
 const PERIODS: [&str; 5] = ["daily", "weekly", "monthly", "yearly", "never"];
@@ -10,18 +11,21 @@ const PERIODS: [&str; 5] = ["daily", "weekly", "monthly", "yearly", "never"];
 const ADVERTISED: Check = Check::new(
 	"EXT13-01",
 	Level::Must,
+	Spec::Nwc13,
 	"get_budget is listed in the info event and get_info",
 	"Apps only call get_budget when both list it.",
 );
 const SHAPE: Check = Check::new(
 	"EXT13-02",
 	Level::Must,
+	Spec::Nwc13,
 	"get_budget is empty or has every required field",
 	"An empty result means no budget, so a configured budget must never look empty or partial.",
 );
 const RENEWAL: Check = Check::new(
 	"EXT13-03",
 	Level::Must,
+	Spec::Nwc13,
 	"A renewing budget has renews_at, a never budget doesn't",
 	"Apps tell users when their allowance resets from renews_at.",
 );
@@ -29,26 +33,27 @@ const RENEWAL: Check = Check::new(
 pub const CHECKS: &[&Check] = &[&ADVERTISED, &SHAPE, &RENEWAL];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	let advertised = advertised(ctx);
+	let advertised = advertised(ctx).citing(&ctx.shared("get_info"));
 	if !ctx.supports("get_budget") {
 		let reason = "get_budget not advertised in the info event";
 		return vec![advertised, SHAPE.skip(reason), RENEWAL.skip(reason)];
 	}
-	let reply = ctx.wallet.send(Request::new("get_budget", ctx.encryption())).await;
+	let (reply, evidence) =
+		track(ctx.wallet.send(Request::new("get_budget", ctx.encryption()))).await;
 	let budget = match &reply {
 		Ok(reply) if reply.error().is_none() => match reply.result() {
 			Some(Value::Object(budget)) => budget.clone(),
 			_ => {
 				let reason = "reply has no result object";
-				return vec![advertised, SHAPE.fail(reason), RENEWAL.skip(reason)];
+				return vec![advertised, SHAPE.fail(reason).with(&evidence), RENEWAL.skip(reason)];
 			}
 		},
 		_ => {
 			let reason = format!("get_budget: {}", describe(&reply));
-			return vec![advertised, SHAPE.fail(&reason), RENEWAL.skip(reason)];
+			return vec![advertised, SHAPE.fail(&reason).with(&evidence), RENEWAL.skip(reason)];
 		}
 	};
-	vec![advertised, shape(&budget), renewal(&budget)]
+	vec![advertised, shape(&budget).with(&evidence), renewal(&budget).with(&evidence)]
 }
 
 fn advertised(ctx: &Context) -> Outcome {
