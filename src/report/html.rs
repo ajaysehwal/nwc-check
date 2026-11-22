@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::Report;
+use super::{Report, escape, utc};
 use crate::check::{Level, Outcome, Status};
 use crate::evidence::Exchange;
 
@@ -197,38 +197,6 @@ fn mark(status: Status) -> &'static str {
 	}
 }
 
-fn escape(text: &str) -> String {
-	let mut escaped = String::with_capacity(text.len());
-	for character in text.chars() {
-		match character {
-			'&' => escaped.push_str("&amp;"),
-			'<' => escaped.push_str("&lt;"),
-			'>' => escaped.push_str("&gt;"),
-			'"' => escaped.push_str("&quot;"),
-			'\'' => escaped.push_str("&#39;"),
-			other => escaped.push(other),
-		}
-	}
-	escaped
-}
-
-/// Formats Unix seconds as a UTC date and time, e.g. "2026-11-22 14:05 UTC".
-fn utc(secs: u64) -> String {
-	let days = (secs / 86_400) as i64;
-	let (hour, minute) = ((secs % 86_400) / 3600, (secs % 3600) / 60);
-	// Civil-from-days, from Howard Hinnant's date algorithms.
-	let z = days + 719_468;
-	let era = z.div_euclid(146_097);
-	let doe = z.rem_euclid(146_097);
-	let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-	let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-	let mp = (5 * doy + 2) / 153;
-	let day = doy - (153 * mp + 2) / 5 + 1;
-	let month = if mp < 10 { mp + 3 } else { mp - 9 };
-	let year = yoe + era * 400 + i64::from(month <= 2);
-	format!("{year}-{month:02}-{day:02} {hour:02}:{minute:02} UTC")
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -246,11 +214,5 @@ mod tests {
 		assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
 		assert!(html.contains("Wallet has problems"));
 		assert!(html.contains("https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md"));
-	}
-
-	#[test]
-	fn formats_utc_dates() {
-		assert_eq!(utc(0), "1970-01-01 00:00 UTC");
-		assert_eq!(utc(1_795_000_000), "2026-11-18 11:06 UTC");
 	}
 }

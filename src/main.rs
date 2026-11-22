@@ -170,6 +170,7 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 			write_report(Some(path), &report().to_html())?;
 			ui.saved("HTML report", path);
 		}
+		Format::Junit => write_report(args.output.as_deref(), &report().to_junit())?,
 	}
 
 	Ok(exit_code(&summary, settings.strict))

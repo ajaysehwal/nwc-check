@@ -124,6 +124,8 @@ pub enum Format {
 	Json,
 	/// Terminal output, plus a self-contained page to share
 	Html,
+	/// JUnit XML, for CI systems that show results per test
+	Junit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Deserialize)]
