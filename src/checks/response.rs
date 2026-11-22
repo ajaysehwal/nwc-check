@@ -57,7 +57,8 @@ fn result_type(ctx: &Context) -> Outcome {
 	match &ctx.get_info {
 		Ok(reply) => match reply.result_type() {
 			Some("get_info") => RESULT_TYPE.pass("get_info"),
-			other => RESULT_TYPE.fail(format!("expected get_info, got {other:?}")),
+			Some(other) => RESULT_TYPE.fail(format!("expected get_info, got {other}")),
+			None => RESULT_TYPE.fail("reply has no result_type"),
 		},
 		Err(error) => RESULT_TYPE.skip(format!("get_info: {error}")),
 	}

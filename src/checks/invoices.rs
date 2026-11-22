@@ -109,11 +109,12 @@ fn create(created: &Result<Created, String>) -> Outcome {
 		Err(error) => return CREATE.fail(error),
 	};
 	let mut problems = Vec::new();
-	if invoice.amount_milli_satoshis() != Some(AMOUNT_MSAT) {
-		problems.push(format!(
-			"invoice is for {:?} msats, asked for {AMOUNT_MSAT}",
-			invoice.amount_milli_satoshis()
-		));
+	match invoice.amount_milli_satoshis() {
+		Some(AMOUNT_MSAT) => {}
+		Some(amount) => {
+			problems.push(format!("invoice is for {amount} msats, asked for {AMOUNT_MSAT}"))
+		}
+		None => problems.push(format!("invoice has no amount, asked for {AMOUNT_MSAT} msats")),
 	}
 	match invoice.description() {
 		Bolt11InvoiceDescriptionRef::Direct(description)

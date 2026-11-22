@@ -139,6 +139,14 @@ async fn evidence_names_each_checks_requests() {
 }
 
 #[tokio::test]
+async fn wrong_amount_is_reported_in_plain_msats() {
+	let bugs = Bugs { wrong_amount: true, ..Bugs::default() };
+	let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;
+	let create = outcomes.iter().find(|outcome| outcome.id == "CORE-01").unwrap();
+	assert_eq!(create.detail, "invoice is for 22000 msats, asked for 21000");
+}
+
+#[tokio::test]
 async fn reply_without_e_tag_is_reported() {
 	let bugs = Bugs { skip_e_tag: true, ..Bugs::default() };
 	let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;
