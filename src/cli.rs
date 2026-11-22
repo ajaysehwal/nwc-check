@@ -17,7 +17,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
 	/// Run the checks against a wallet service
-	Run(RunArgs),
+	Run(Box<RunArgs>),
 	/// Write a nwc-check.toml with every setting, so runs only need the connection string
 	Init(InitArgs),
 	/// List all checks
@@ -57,6 +57,10 @@ pub struct RunArgs {
 	/// Treat warnings as failures
 	#[arg(long)]
 	pub strict: bool,
+
+	/// File to write the report to (default nwc-check-report.html for html, stdout otherwise)
+	#[arg(long, short, value_name = "PATH")]
+	pub output: Option<PathBuf>,
 
 	/// Disable colored output
 	#[arg(long)]
@@ -118,6 +122,8 @@ pub struct InitArgs {
 pub enum Format {
 	Text,
 	Json,
+	/// Terminal output, plus a self-contained page to share
+	Html,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Deserialize)]

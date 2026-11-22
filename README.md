@@ -28,15 +28,24 @@ nwc-check run
 | Option | Description |
 |---|---|
 | `--readonly-uri <URI>` | Second connection without `pay_invoice`, for SAFE-05 (or `NWC_READONLY_URI`) |
+| `--output <PATH>`, `-o` | Write the report to this file. Defaults to `nwc-check-report.html` for `html`, and to stdout for `json` |
 | `--config <PATH>` | Settings file (default `./nwc-check.toml` when it exists) |
 | `--network <NETWORK>` | Fail if the wallet reports a different network (`mainnet`, `testnet`, `signet`, `regtest`) |
 | `--only <IDS>` | Only report checks whose ID starts with one of these prefixes, e.g. `DISC,ENC-01` |
-| `--format <FORMAT>` | `text` (default) or `json` |
+| `--format <FORMAT>` | `text` (default), `json` or `html` |
 | `--timeout <SECS>` | Seconds to wait for each reply (default 10) |
 | `--strict` | Treat warnings as failures |
 | `--no-color` | Disable colored output (`NO_COLOR` is also respected) |
 
 `nwc-check list` prints all checks.
+
+To share a run, also write it as a single HTML page:
+
+```sh
+nwc-check run --format html "nostr+walletconnect://..."
+```
+
+The run shows its usual progress and results, writes `nwc-check-report.html` (or the file given with `--output`), and ends with a `file://` link to open it. The page has no scripts and loads nothing from the network. It shows the verdict, each problem with its evidence and a link to the spec, and every result grouped by section.
 
 ### Settings file
 
@@ -208,7 +217,7 @@ src/
 ├── wallet.rs      Sends raw NIP-47 requests and decrypts replies
 ├── check.rs       Check, Level, Spec, Status, Outcome and Summary types
 ├── evidence.rs    Records the requests each check sends
-├── report.rs      JSON report
+├── report/        JSON and HTML reports
 ├── counterparty/  Node that pays and gets paid by the wallet (Counterparty trait, LND client)
 └── checks/
     ├── mod.rs     Context shared by all checks, sections and the runner

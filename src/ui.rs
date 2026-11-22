@@ -1,4 +1,6 @@
+use std::fmt::Write as _;
 use std::io::Write;
+use std::path::Path;
 use std::time::Duration;
 
 use console::{Style, style};
@@ -116,6 +118,10 @@ impl Ui {
 		));
 	}
 
+	pub fn saved(&self, label: &str, path: &Path) {
+		self.print(format!("\n{} {label}: {}", style("→").cyan(), file_url(path)));
+	}
+
 	pub fn finish(&self) {
 		self.bar.finish_and_clear();
 	}
@@ -192,4 +198,32 @@ fn human_duration(elapsed: Duration) -> String {
 
 pub fn write_stdout(text: &str) {
 	let _ = std::io::stdout().write_all(text.as_bytes());
+}
+
+/// A file:// URL for the path, which most terminals make clickable.
+fn file_url(path: &Path) -> String {
+	let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
+	let mut url = String::from("file://");
+	for byte in absolute.to_string_lossy().bytes() {
+		match byte {
+			b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+				url.push(char::from(byte));
+			}
+			_ => {
+				let _ = write!(url, "%{byte:02X}");
+			}
+		}
+	}
+	url
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn file_urls_are_absolute_and_encoded() {
+		assert_eq!(file_url(Path::new("/tmp/my report.html")), "file:///tmp/my%20report.html");
+		assert!(file_url(Path::new("report.html")).starts_with("file:///"));
+	}
 }
