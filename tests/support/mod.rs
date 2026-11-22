@@ -55,6 +55,7 @@ pub struct Bugs {
 	pub budget_without_total: bool,
 	pub renews_at_missing: bool,
 	pub budget_ignores_fees: bool,
+	pub pays_amount_param: bool,
 }
 
 impl Bugs {
@@ -80,6 +81,7 @@ impl Bugs {
 			budget_without_total: true,
 			renews_at_missing: true,
 			budget_ignores_fees: true,
+			pays_amount_param: true,
 			..Self::default()
 		}
 	}
@@ -167,8 +169,10 @@ impl MockNetwork {
 		if invoice.paid && !repeat {
 			bail!("invoice already paid");
 		}
-		if invoice.amount_msat == 0 {
-			invoice.amount_msat = amount_msat.ok_or_else(|| anyhow!("amountless invoice"))?;
+		match amount_msat {
+			Some(amount_msat) => invoice.amount_msat = amount_msat,
+			None if invoice.amount_msat == 0 => bail!("amountless invoice"),
+			None => {}
 		}
 		invoice.paid = true;
 		Ok(invoice.preimage)
@@ -506,10 +510,13 @@ impl MockWallet {
 	async fn pay(&self, params: &Value) -> Result<Value, Value> {
 		let failed = || error_value("PAYMENT_FAILED");
 		let bolt11 = params["invoice"].as_str().unwrap_or_default();
-		let amount_msat = match self.network.amount_msat(bolt11).ok_or_else(failed)? {
-			0 if self.bugs.ignores_amount => return Err(failed()),
-			0 => params["amount"].as_u64().ok_or_else(failed)?,
-			amount_msat => amount_msat,
+		let param = params["amount"].as_u64();
+		let amount_msat = match (self.network.amount_msat(bolt11).ok_or_else(failed)?, param) {
+			(0, _) if self.bugs.ignores_amount => return Err(failed()),
+			(0, param) => param.ok_or_else(failed)?,
+			(_, Some(param)) if self.bugs.pays_amount_param => param,
+			(fixed, Some(param)) if param != fixed => return Err(error_value("OTHER")),
+			(fixed, _) => fixed,
 		};
 		let fee = if self.bugs.budget_ignores_fees { 0 } else { FEE_MSAT };
 		self.charge(amount_msat + fee).await?;
