@@ -178,7 +178,7 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 | CORE-08 | MUST | pay_invoice pays the amount given for an amountless invoice |
 | CORE-09 | SAFETY | Balance drops by the amount plus fees_paid |
 
-Checks for methods or encryption schemes the wallet doesn't advertise are skipped. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks, CORE-04, CORE-07 to CORE-09, SAFE-02, SAFE-03, SAFE-05 and EXT13-04, which move funds, are skipped without a counterparty and `--allow-spend`, and on mainnet. Invoice checks decode the returned BOLT11 invoice rather than trusting the reply's fields.
+Checks for methods or encryption schemes the wallet doesn't advertise are skipped. A reply without an `e` tag can't be matched to its request; it's reported as such, and RESP-04 warns, rather than looking like no reply. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks, CORE-04, CORE-07 to CORE-09, SAFE-02, SAFE-03, SAFE-05 and EXT13-04, which move funds, are skipped without a counterparty and `--allow-spend`, and on mainnet. Invoice checks decode the returned BOLT11 invoice rather than trusting the reply's fields.
 
 SAFE-03 sends one signed `pay_invoice` event, then publishes the identical event again after the wallet replies, and counts settled payments for that hash with `list_transactions`. It reserves twice the payment amount from `--max-sats`, since a wallet with this bug pays twice. It's skipped when the relays don't pass the copy on.
 

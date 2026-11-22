@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::{Context, describe};
 use crate::check::{Check, Level, Outcome};
-use crate::wallet::{Reply, Request};
+use crate::wallet::{Reply, Request, WalletError};
 
 const RESULT_TYPE: Check = Check::new(
 	"RESP-01",
@@ -89,6 +89,7 @@ fn tags(ctx: &Context) -> Outcome {
 				},
 			)
 		}
+		Err(WalletError::NoETag) => TAGS.fail("reply has no e tag"),
 		Err(error) => TAGS.skip(format!("get_info: {error}")),
 	}
 }

@@ -113,6 +113,15 @@ async fn counterparty_without_funds_isnt_blamed_on_the_wallet() {
 }
 
 #[tokio::test]
+async fn reply_without_e_tag_is_reported() {
+	let bugs = Bugs { skip_e_tag: true, ..Bugs::default() };
+	let (outcomes, _) = Run { bugs, ..Run::default() }.checks().await;
+	let tags = outcomes.iter().find(|outcome| outcome.id == "RESP-04").unwrap();
+	assert_eq!(tags.status, Status::Warn);
+	assert_eq!(tags.detail, "reply has no e tag");
+}
+
+#[tokio::test]
 async fn buggy_wallet_is_caught() {
 	let (outcomes, _) = Run { bugs: Bugs::all(), ..Run::default() }.checks().await;
 	assert_eq!(status(&outcomes, "ERR-01"), Status::Warn);

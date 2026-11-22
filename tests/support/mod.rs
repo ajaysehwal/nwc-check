@@ -38,6 +38,7 @@ pub struct Bugs {
 	pub answer_expired: bool,
 	pub wrong_error_code: bool,
 	pub skip_p_tag: bool,
+	pub skip_e_tag: bool,
 	pub wrong_preimage: bool,
 	pub wrong_amount: bool,
 	pub ignore_description_hash: bool,
@@ -57,6 +58,7 @@ pub struct Bugs {
 }
 
 impl Bugs {
+	/// Every bug except skip_e_tag, which hides every reply from the checks.
 	pub fn all() -> Self {
 		Self {
 			answer_expired: true,
@@ -78,6 +80,7 @@ impl Bugs {
 			budget_without_total: true,
 			renews_at_missing: true,
 			budget_ignores_fees: true,
+			..Self::default()
 		}
 	}
 }
@@ -392,8 +395,10 @@ impl MockWallet {
 			nip04::encrypt(secret, &request.pubkey, body).unwrap()
 		};
 
-		let mut builder =
-			EventBuilder::new(Kind::WalletConnectResponse, content).tag(Tag::event(request.id));
+		let mut builder = EventBuilder::new(Kind::WalletConnectResponse, content);
+		if !self.bugs.skip_e_tag {
+			builder = builder.tag(Tag::event(request.id));
+		}
 		if !self.bugs.skip_p_tag {
 			builder = builder.tag(Tag::public_key(request.pubkey));
 		}
