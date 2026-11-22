@@ -38,6 +38,9 @@ async fn expired(ctx: &Context) -> Outcome {
 	let request = Request::new("get_info", ctx.encryption()).expiration(expired);
 	match ctx.wallet.send(request).await {
 		Err(WalletError::NoReply) => EXPIRED.pass("no reply"),
+		Err(WalletError::NoETag) => {
+			EXPIRED.skip("replies have no e tag, so they can't be told apart")
+		}
 		Err(WalletError::Rejected(_)) => EXPIRED.skip("relays dropped the expired request"),
 		Ok(reply) if reply.error().is_some() => EXPIRED.pass(describe(&Ok(reply))),
 		other => EXPIRED.fail(format!("expired request was answered: {}", describe(&other))),

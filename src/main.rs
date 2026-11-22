@@ -14,7 +14,7 @@ use nwc_check::check::{Outcome, Summary};
 use nwc_check::checks::{self, Context, Payments};
 use nwc_check::counterparty::{Counterparty, Lnd};
 use nwc_check::report::Report;
-use nwc_check::wallet::Wallet;
+use nwc_check::wallet::{Wallet, WalletError};
 
 use crate::cli::{Cli, Command, Format, InitArgs, RunArgs};
 use crate::config::{Config, LndSettings, Settings};
@@ -116,13 +116,20 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 		),
 		None => ui.step(false, "No wallet info event found"),
 	});
-	if ctx.get_info.is_err() {
-		say(&|ui| {
+	match &ctx.get_info {
+		Err(WalletError::NoETag) => say(&|ui| {
+			ui.step(
+				false,
+				"The wallet's replies have no e tag, so most checks can't match them to their requests.",
+			)
+		}),
+		Err(_) => say(&|ui| {
 			ui.step(
 				false,
 				"The wallet didn't answer get_info. Check that the wallet service is online and the connection string is current.",
 			)
-		});
+		}),
+		Ok(_) => {}
 	}
 
 	let total = checks::catalog().len();

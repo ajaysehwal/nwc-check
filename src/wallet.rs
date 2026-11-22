@@ -125,6 +125,7 @@ impl Reply {
 #[derive(Debug)]
 pub enum WalletError {
 	NoReply,
+	NoETag,
 	Rejected(String),
 	Undecryptable,
 	InvalidJson(String),
@@ -135,6 +136,7 @@ impl fmt::Display for WalletError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::NoReply => write!(f, "no reply before the timeout"),
+			Self::NoETag => write!(f, "reply has no e tag referencing the request"),
 			Self::Rejected(reason) => write!(f, "relays rejected the request: {reason}"),
 			Self::Undecryptable => write!(f, "reply could not be decrypted"),
 			Self::InvalidJson(error) => write!(f, "reply is not valid JSON: {error}"),
@@ -151,6 +153,7 @@ fn relay_error(error: impl fmt::Display) -> WalletError {
 
 pub struct Signed {
 	event: Event,
+	method: String,
 	scheme: Scheme,
 	signer: Keys,
 }
@@ -203,14 +206,43 @@ impl Wallet {
 	pub fn sign(&self, request: Request) -> Result<Signed, WalletError> {
 		let signer = request.signer.clone().unwrap_or_else(|| self.keys.clone());
 		let event = self.build_event(&request, &signer)?;
-		Ok(Signed { event, scheme: request.encryption.scheme(), signer })
+		Ok(Signed { event, method: request.method, scheme: request.encryption.scheme(), signer })
 	}
 
 	pub async fn deliver(&self, signed: &Signed) -> Result<Reply, WalletError> {
 		let mut replies = self.replies(signed).await?;
+		// Replies without an e tag never match the filter above, so watch for them separately.
+		let mut untagged = self
+			.client
+			.stream_events(
+				Filter::new().kind(Kind::WalletConnectResponse).author(self.uri.public_key),
+			)
+			.timeout(self.timeout)
+			.policy(ReqExitPolicy::WaitDurationAfterEOSE(self.timeout))
+			.await
+			.map_err(relay_error)?;
 		self.publish(signed).await?;
-		let (_, response) = replies.next().await.ok_or(WalletError::NoReply)?;
-		self.open(signed, response.map_err(relay_error)?)
+
+		loop {
+			tokio::select! {
+				reply = replies.next() => {
+					let (_, response) = reply.ok_or(WalletError::NoReply)?;
+					return self.open(signed, response.map_err(relay_error)?);
+				}
+				Some((_, Ok(response))) = untagged.next() => {
+					if self.is_untagged_reply(signed, response) {
+						return Err(WalletError::NoETag);
+					}
+				}
+			}
+		}
+	}
+
+	fn is_untagged_reply(&self, signed: &Signed, response: Event) -> bool {
+		response.tags.event_ids().next().is_none()
+			&& self
+				.open(signed, response)
+				.is_ok_and(|reply| reply.result_type() == Some(signed.method.as_str()))
 	}
 
 	pub async fn redeliver(&self, signed: &Signed) -> Result<Redelivery, WalletError> {
