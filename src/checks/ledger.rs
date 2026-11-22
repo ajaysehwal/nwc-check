@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use super::payments::result_field;
 use super::{Context, Payments, describe};
 use crate::check::{Check, Level, Outcome, Spec};
+use crate::evidence::track;
 use crate::wallet::Request;
 
 const BALANCE: Check = Check::new(
@@ -33,7 +34,8 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 	if !ctx.supports("pay_invoice") {
 		return skip_all("pay_invoice not advertised");
 	}
-	match pay_once(ctx, payments).await {
+	let (paid, evidence) = track(pay_once(ctx, payments)).await;
+	let outcomes = match paid {
 		Ok(Paid { fees, balance, budget }) => {
 			let expected = payments.amount_msat + fees;
 			vec![
@@ -58,7 +60,8 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 			]
 		}
 		Err(reason) => skip_all(&reason),
-	}
+	};
+	outcomes.into_iter().map(|outcome| outcome.with(&evidence)).collect()
 }
 
 struct Paid {

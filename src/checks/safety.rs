@@ -1,7 +1,7 @@
 use nostr_sdk::prelude::Timestamp;
 use serde_json::{Value, json};
 
-use super::{Context, OVER_BUDGET, describe, over_budget, state};
+use super::{Context, OVER_BUDGET, describe, over_budget, state, tracked};
 use crate::check::{Check, Level, Outcome, Spec};
 use crate::counterparty::to_hex;
 use crate::wallet::{Request, WalletError};
@@ -40,8 +40,12 @@ const OVERRIDE: Check = Check::new(
 pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE, &OVERRIDE, &READONLY];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	let (expired, duplicate, overridden, readonly) =
-		tokio::join!(expired(ctx), duplicate(ctx), amount_override(ctx), readonly(ctx));
+	let (expired, duplicate, overridden, readonly) = tokio::join!(
+		tracked(expired(ctx)),
+		tracked(duplicate(ctx)),
+		tracked(amount_override(ctx)),
+		tracked(readonly(ctx)),
+	);
 	vec![expired, duplicate, overridden, readonly]
 }
 

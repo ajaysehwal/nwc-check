@@ -140,6 +140,8 @@ Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` prob
 
 Each check also names the spec it comes from, pinned to the commit it was written against: NIP-47 [`c53877571f96`](https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md), NIP-40 [`f5a15ea27e06`](https://github.com/nostr-protocol/nips/blob/f5a15ea27e06/40.md) or NWC-13 [`36ab132bbce1`](https://github.com/nostr-wallet-connect/nwc/blob/36ab132bbce1/13.md). SAFE-02, SAFE-03 and SAFE-04 have none. The spec appears in `nwc-check list`, in the JSON `spec` field, and under each problem in the text output.
 
+The JSON report also records evidence for each check: every request it sent, as `method`, `request` and `reply` event IDs and `ms`, plus the check's total `duration_ms`. Use the event IDs to find the exact events on the relay. Checks built on the shared `get_info` reply cite that exchange. Checks that send nothing, such as DISC-01, have none.
+
 | ID | Level | Check |
 |---|---|---|
 | DISC-01 | MUST | Info event is published |
@@ -205,6 +207,7 @@ src/
 ├── lib.rs
 ├── wallet.rs      Sends raw NIP-47 requests and decrypts replies
 ├── check.rs       Check, Level, Spec, Status, Outcome and Summary types
+├── evidence.rs    Records the requests each check sends
 ├── report.rs      JSON report
 ├── counterparty/  Node that pays and gets paid by the wallet (Counterparty trait, LND client)
 └── checks/

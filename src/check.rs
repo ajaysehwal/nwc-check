@@ -1,5 +1,7 @@
 use serde::{Serialize, Serializer};
 
+use crate::evidence::{Evidence, Exchange};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
@@ -109,6 +111,8 @@ impl Check {
 			level: self.level,
 			spec: self.spec,
 			title: self.title,
+			duration_ms: None,
+			evidence: Vec::new(),
 			why: self.why,
 			status,
 			detail: detail.into(),
@@ -124,11 +128,26 @@ pub struct Outcome {
 	pub spec: Spec,
 	pub title: &'static str,
 	pub why: &'static str,
+	pub duration_ms: Option<u64>,
+	pub evidence: Vec<Exchange>,
 	pub status: Status,
 	pub detail: String,
 }
 
 impl Outcome {
+	/// Attaches what the code behind this outcome sent, and how long it took.
+	pub fn with(mut self, evidence: &Evidence) -> Self {
+		self.evidence.extend(evidence.exchanges.iter().cloned());
+		self.duration_ms = Some(evidence.took.as_millis().try_into().unwrap_or(u64::MAX));
+		self
+	}
+
+	/// Cites exchanges made elsewhere, such as the shared get_info reply.
+	pub fn citing(mut self, exchanges: &[Exchange]) -> Self {
+		self.evidence.extend(exchanges.iter().cloned());
+		self
+	}
+
 	pub fn is_problem(&self) -> bool {
 		matches!(self.status, Status::Fail | Status::Warn)
 	}

@@ -60,7 +60,7 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 			METHODS.skip("no info event"),
 			NIP44.skip("no info event"),
 			GET_INFO_METHODS.skip("no info event"),
-			network(ctx),
+			network(ctx).citing(&ctx.shared("get_info")),
 			EXTENSIONS.skip("no info event"),
 		];
 	};
@@ -77,9 +77,9 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 		INFO_EVENT.pass(format!("published {}", age(info.created_at))),
 		METHODS.verdict(!ctx.methods.is_empty(), list_or("methods", &ctx.methods)),
 		NIP44.verdict(ctx.advertises(Scheme::Nip44), list_or("encryption", &ctx.schemes)),
-		get_info_methods(ctx),
-		network(ctx),
-		extensions(ctx, &info_extensions),
+		get_info_methods(ctx).citing(&ctx.shared("get_info")),
+		network(ctx).citing(&ctx.shared("get_info")),
+		extensions(ctx, &info_extensions).citing(&ctx.shared("get_info")),
 	]
 }
 

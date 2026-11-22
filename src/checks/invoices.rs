@@ -5,9 +5,10 @@ use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef};
 use nostr_sdk::prelude::Keys;
 use serde_json::{Value, json};
 
-use super::{Context, describe, state};
+use super::{Context, describe, state, tracked};
 use crate::check::{Check, Level, Outcome, Spec};
 use crate::counterparty::{sha256, to_hex};
+use crate::evidence::track;
 use crate::wallet::Request;
 
 const AMOUNT_MSAT: u64 = 21_000;
@@ -62,24 +63,27 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 		let reason = "make_invoice not advertised";
 		let mut outcomes: Vec<Outcome> =
 			[&CREATE, &DESCRIPTION_HASH, &LOOKUP, &SETTLE].iter().map(|c| c.skip(reason)).collect();
-		outcomes.push(unknown(ctx).await);
+		outcomes.push(tracked(unknown(ctx)).await);
 		return outcomes;
 	}
 
 	let hash = sha256(b"nwc-check description");
-	let (created, hashed, settle, unknown) = tokio::join!(
-		make_invoice(
+	let ((created, created_evidence), (hashed, hashed_evidence), settle, unknown) = tokio::join!(
+		track(make_invoice(
 			ctx,
 			json!({ "amount": AMOUNT_MSAT, "description": DESCRIPTION, "expiry": EXPIRY_SECS })
-		),
-		make_invoice(ctx, json!({ "amount": AMOUNT_MSAT, "description_hash": to_hex(&hash) })),
-		settle(ctx),
-		unknown(ctx),
+		)),
+		track(make_invoice(
+			ctx,
+			json!({ "amount": AMOUNT_MSAT, "description_hash": to_hex(&hash) })
+		)),
+		tracked(settle(ctx)),
+		tracked(unknown(ctx)),
 	);
 	vec![
-		create(&created),
-		description_hash(&hashed, &hash),
-		lookup(ctx, &created).await,
+		create(&created).with(&created_evidence),
+		description_hash(&hashed, &hash).with(&hashed_evidence),
+		tracked(lookup(ctx, &created)).await.citing(&created_evidence.exchanges),
 		settle,
 		unknown,
 	]

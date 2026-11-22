@@ -1,5 +1,6 @@
 use super::{Context, describe};
 use crate::check::{Check, Level, Outcome, Spec};
+use crate::evidence::track;
 use crate::wallet::{Encryption, Reply, Request, Scheme, WalletError};
 
 const NIP44_REPLY: Check = Check::new(
@@ -37,11 +38,16 @@ const UNSUPPORTED_SCHEME: &str = "nwc_check_unsupported";
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
 	let get_info = |encryption| Request::new("get_info", encryption);
-	let (nip44, nip04, unsupported, untagged) = tokio::join!(
-		ctx.wallet.send(get_info(Encryption::Tagged(Scheme::Nip44))),
-		ctx.wallet.send(get_info(Encryption::Tagged(Scheme::Nip04))),
-		ctx.wallet.send(get_info(Encryption::Unsupported(UNSUPPORTED_SCHEME))),
-		ctx.wallet.send(get_info(Encryption::Untagged)),
+	let (
+		(nip44, nip44_evidence),
+		(nip04, nip04_evidence),
+		(unsupported, unsupported_evidence),
+		(untagged, untagged_evidence),
+	) = tokio::join!(
+		track(ctx.wallet.send(get_info(Encryption::Tagged(Scheme::Nip44)))),
+		track(ctx.wallet.send(get_info(Encryption::Tagged(Scheme::Nip04)))),
+		track(ctx.wallet.send(get_info(Encryption::Unsupported(UNSUPPORTED_SCHEME)))),
+		track(ctx.wallet.send(get_info(Encryption::Untagged))),
 	);
 
 	let roundtrip = |check: &Check, scheme: Scheme, reply: &Result<Reply, WalletError>| {
@@ -78,9 +84,9 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 	};
 
 	vec![
-		roundtrip(&NIP44_REPLY, Scheme::Nip44, &nip44),
-		roundtrip(&NIP04_REPLY, Scheme::Nip04, &nip04),
-		unsupported,
-		untagged,
+		roundtrip(&NIP44_REPLY, Scheme::Nip44, &nip44).with(&nip44_evidence),
+		roundtrip(&NIP04_REPLY, Scheme::Nip04, &nip04).with(&nip04_evidence),
+		unsupported.with(&unsupported_evidence),
+		untagged.with(&untagged_evidence),
 	]
 }

@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::{Context, describe};
+use super::{Context, describe, tracked};
 use crate::check::{Check, Level, Outcome, Spec};
 use crate::wallet::{Reply, Request, WalletError};
 
@@ -43,7 +43,14 @@ const BALANCE: Check = Check::new(
 pub const CHECKS: &[&Check] = &[&RESULT_TYPE, &NULL_ERROR, &ERROR_SHAPE, &TAGS, &BALANCE];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	vec![result_type(ctx), null_error(ctx), error_shape(ctx), tags(ctx), balance(ctx).await]
+	let get_info = ctx.shared("get_info");
+	vec![
+		result_type(ctx).citing(&get_info),
+		null_error(ctx).citing(&get_info),
+		error_shape(ctx).citing(&get_info),
+		tags(ctx).citing(&get_info),
+		tracked(balance(ctx)).await,
+	]
 }
 
 fn result_type(ctx: &Context) -> Outcome {

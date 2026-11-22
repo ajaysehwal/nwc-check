@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{Context, OVER_BUDGET, Payments, describe, over_budget};
+use super::{Context, OVER_BUDGET, Payments, describe, over_budget, tracked};
 use crate::check::{Check, Level, Outcome, Spec};
 use crate::counterparty::{PayError, from_hex, sha256};
 use crate::wallet::{Reply, Request, WalletError};
@@ -50,9 +50,9 @@ pub async fn run(ctx: &Context) -> Vec<Outcome> {
 		Ok(payments) => payments,
 		Err(reason) => return CHECKS.iter().map(|check| check.skip(reason)).collect(),
 	};
-	let mut outcomes = vec![receive(ctx, payments).await];
-	outcomes.extend(send(ctx, payments).await);
-	outcomes.push(amountless(ctx, payments).await);
+	let mut outcomes = vec![tracked(receive(ctx, payments)).await];
+	outcomes.extend(tracked(send(ctx, payments)).await);
+	outcomes.push(tracked(amountless(ctx, payments)).await);
 	outcomes
 }
 
