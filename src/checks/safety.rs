@@ -1,7 +1,7 @@
 use nostr_sdk::prelude::Timestamp;
 use serde_json::{Value, json};
 
-use super::{Context, describe, state};
+use super::{Context, OVER_BUDGET, describe, over_budget, state};
 use crate::check::{Check, Level, Outcome};
 use crate::counterparty::to_hex;
 use crate::wallet::{Request, WalletError};
@@ -26,11 +26,19 @@ const READONLY: Check = Check::new(
 	"A connection the user granted no payment permission must never spend their funds.",
 );
 
-pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE, &READONLY];
+const OVERRIDE: Check = Check::new(
+	"SAFE-04",
+	Level::Safety,
+	"amount can't change a fixed-amount invoice",
+	"A wallet that pays the amount param instead of the invoice amount can be made to overpay.",
+);
+
+pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE, &OVERRIDE, &READONLY];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	let (expired, duplicate, readonly) = tokio::join!(expired(ctx), duplicate(ctx), readonly(ctx));
-	vec![expired, duplicate, readonly]
+	let (expired, duplicate, overridden, readonly) =
+		tokio::join!(expired(ctx), duplicate(ctx), amount_override(ctx), readonly(ctx));
+	vec![expired, duplicate, overridden, readonly]
 }
 
 async fn expired(ctx: &Context) -> Outcome {
@@ -143,5 +151,43 @@ async fn readonly(ctx: &Context) -> Outcome {
 			}
 		},
 		Err(error) => READONLY.skip(format!("couldn't look up the invoice: {error:#}")),
+	}
+}
+
+async fn amount_override(ctx: &Context) -> Outcome {
+	if !ctx.supports("pay_invoice") {
+		return OVERRIDE.skip("pay_invoice not advertised");
+	}
+	let payments = match &ctx.payments {
+		Ok(payments) => payments,
+		Err(reason) => return OVERRIDE.skip(reason),
+	};
+	let invoice = match payments.node.create_invoice(payments.amount_msat, "nwc-check").await {
+		Ok(invoice) => invoice,
+		Err(error) => {
+			return OVERRIDE.skip(format!("counterparty couldn't create an invoice: {error:#}"));
+		}
+	};
+	// LND accepts up to twice the invoice amount, so a wallet that honours the override overpays.
+	let overridden = payments.amount_msat * 2;
+	if let Err(reason) = payments.reserve(2) {
+		return OVERRIDE.skip(reason);
+	}
+	let params = json!({ "invoice": invoice.bolt11, "amount": overridden });
+	let reply = ctx.wallet.send(Request::new("pay_invoice", ctx.encryption()).params(params)).await;
+	if over_budget(&reply) {
+		return OVERRIDE.skip(OVER_BUDGET);
+	}
+	let rejected = reply.as_ref().is_ok_and(|reply| reply.error().is_some());
+	match payments.node.paid_msat(&invoice.payment_hash).await {
+		Ok(Some(paid)) if paid == payments.amount_msat => {
+			OVERRIDE.pass("paid the invoice amount and ignored the amount param")
+		}
+		Ok(Some(paid)) => {
+			OVERRIDE.fail(format!("paid {paid} msats for a {} msat invoice", payments.amount_msat))
+		}
+		Ok(None) if rejected => OVERRIDE.pass(format!("rejected, the wallet {}", describe(&reply))),
+		Ok(None) => OVERRIDE.skip(format!("nothing arrived, but the wallet {}", describe(&reply))),
+		Err(error) => OVERRIDE.skip(format!("couldn't look up the invoice: {error:#}")),
 	}
 }
