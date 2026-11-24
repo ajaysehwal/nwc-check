@@ -56,6 +56,7 @@ pub struct Bugs {
 	pub renews_at_missing: bool,
 	pub budget_ignores_fees: bool,
 	pub pays_amount_param: bool,
+	pub pays_stale: bool,
 }
 
 impl Bugs {
@@ -82,6 +83,7 @@ impl Bugs {
 			renews_at_missing: true,
 			budget_ignores_fees: true,
 			pays_amount_param: true,
+			pays_stale: true,
 			..Self::default()
 		}
 	}
@@ -332,6 +334,11 @@ impl MockWallet {
 			return;
 		}
 		if !self.seen.lock().unwrap().insert(request.id) && !self.bugs.pays_duplicates {
+			return;
+		}
+		// A request signed more than ten minutes ago is ignored, unless the wallet has no age limit.
+		let stale = request.created_at < Timestamp::from_secs(Timestamp::now().as_secs() - 10 * 60);
+		if stale && !self.bugs.pays_stale {
 			return;
 		}
 
