@@ -149,7 +149,7 @@ Then pass the printed connection string to `nwc-check run` in another terminal.
 
 Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` problems are warnings. `SAFETY` checks cover behavior the spec doesn't require but that protects funds.
 
-Each check also names the spec it comes from, pinned to the commit it was written against: NIP-47 [`c53877571f96`](https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md), NIP-40 [`f5a15ea27e06`](https://github.com/nostr-protocol/nips/blob/f5a15ea27e06/40.md) or NWC-13 [`36ab132bbce1`](https://github.com/nostr-wallet-connect/nwc/blob/36ab132bbce1/13.md). SAFE-02, SAFE-03, SAFE-04 and SAFE-06 have none. The spec appears in `nwc-check list`, in the JSON `spec` field, and under each problem in the text output.
+Each check also names the spec it comes from, pinned to the commit it was written against: NIP-47 [`c53877571f96`](https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md), NIP-40 [`f5a15ea27e06`](https://github.com/nostr-protocol/nips/blob/f5a15ea27e06/40.md) or NWC-13 [`36ab132bbce1`](https://github.com/nostr-wallet-connect/nwc/blob/36ab132bbce1/13.md). SAFE-02, SAFE-03, SAFE-04, SAFE-06 and SAFE-07 have none. The spec appears in `nwc-check list`, in the JSON `spec` field, and under each problem in the text output.
 
 The JSON report also records evidence for each check: every request it sent, as `method`, `request` and `reply` event IDs and `ms`, plus the check's total `duration_ms`. Use the event IDs to find the exact events on the relay. Checks built on the shared `get_info` reply cite that exchange. Checks that send nothing, such as DISC-01, have none.
 
@@ -179,6 +179,7 @@ The JSON report also records evidence for each check: every request it sent, as 
 | SAFE-04 | SAFETY | amount can't change a fixed-amount invoice |
 | SAFE-05 | SAFETY | A read-only connection can't pay |
 | SAFE-06 | SAFETY | A stale pay_invoice is not paid |
+| SAFE-07 | SAFETY | A future-dated request doesn't lock out later ones |
 | EXT13-01 | MUST | get_budget is listed in the info event and get_info |
 | EXT13-02 | MUST | get_budget is empty or has every required field |
 | EXT13-03 | MUST | A renewing budget has renews_at, a never budget doesn't |
@@ -204,6 +205,8 @@ CORE-09 and EXT13-04 share one payment: CORE-09 compares `get_balance`, and EXT1
 SAFE-04 pays a fixed-amount invoice with `amount` set to twice the invoice amount. It fails if the counterparty receives anything other than the invoice amount, and passes if the wallet rejects the request or ignores the param.
 
 SAFE-06 sends a `pay_invoice` request signed an hour ago, with no `expiration` tag, for a counterparty invoice. It fails if the counterparty receives the payment: a relay, or anyone holding a captured request, can send it again, and a wallet with no age limit pays it again. NIP-47 only defines the `expiration` tag, so this is a safety rule no spec requires, like SAFE-03. It passes when the wallet ignores or rejects the request, and it's skipped when the relays drop the old event themselves.
+
+SAFE-07 sends a `get_info` request dated 14 minutes ahead, then a normal one, and fails if the normal one gets no reply. A wallet that remembers the newest request time to refuse replays must cap that time at now: otherwise one request from a client whose clock runs ahead (or one dated ahead on purpose) makes it ignore every request after it until the clock catches up. The first request is answered or ignored, it makes no difference. It runs after every other check, since a wallet that fails stays locked out for a while, needs no counterparty and moves no funds. It's skipped when the relays drop the future-dated event (many refuse events dated more than 15 minutes ahead), or when `get_info` isn't answered to begin with.
 
 SAFE-05 needs a second connection to the same wallet that doesn't have `pay_invoice` permission. Pass it with `--readonly-uri` or `NWC_READONLY_URI`; like the main connection string, it's never read from the settings file. The read-only connection tries to pay a counterparty invoice, and the check passes only if the wallet replies `RESTRICTED` and nothing arrives.
 

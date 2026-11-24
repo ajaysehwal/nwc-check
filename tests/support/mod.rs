@@ -57,6 +57,7 @@ pub struct Bugs {
 	pub budget_ignores_fees: bool,
 	pub pays_amount_param: bool,
 	pub pays_stale: bool,
+	pub locks_out_future: bool,
 }
 
 impl Bugs {
@@ -84,6 +85,7 @@ impl Bugs {
 			budget_ignores_fees: true,
 			pays_amount_param: true,
 			pays_stale: true,
+			locks_out_future: true,
 			..Self::default()
 		}
 	}
@@ -253,6 +255,8 @@ pub struct MockWallet {
 	paid: Mutex<Vec<[u8; 32]>>,
 	budget: Option<Mutex<Budget>>,
 	balance_msat: Mutex<u64>,
+	/// The created_at of the newest request accepted, to refuse older ones.
+	newest: Mutex<u64>,
 }
 
 struct Budget {
@@ -289,6 +293,7 @@ impl MockWallet {
 			paid: Mutex::default(),
 			budget: budget_msat.map(|total_msat| Mutex::new(Budget { total_msat, used_msat: 0 })),
 			balance_msat: Mutex::new(100_000_000),
+			newest: Mutex::new(0),
 		};
 		let info = EventBuilder::new(Kind::WalletConnectInfo, METHODS.join(" "))
 			.tag(Tag::parse(["encryption", "nip44_v2 nip04"]).unwrap())
@@ -336,9 +341,23 @@ impl MockWallet {
 		if !self.seen.lock().unwrap().insert(request.id) && !self.bugs.pays_duplicates {
 			return;
 		}
-		// A request signed more than ten minutes ago is ignored, unless the wallet has no age limit.
-		let stale = request.created_at < Timestamp::from_secs(Timestamp::now().as_secs() - 10 * 60);
-		if stale && !self.bugs.pays_stale {
+		// A request signed more than ten minutes ago, or more than ten minutes behind the newest one
+		// accepted, is ignored, unless the wallet has no age limit. The newest time counts as no
+		// later than now, so a request dated ahead can't lock out the ones after it. The bug is a
+		// wallet that forgets this.
+		let ignored = {
+			let now = Timestamp::now().as_secs();
+			let created = request.created_at.as_secs();
+			let mut newest = self.newest.lock().unwrap();
+			let ignored =
+				(created + 10 * 60 < now || created + 10 * 60 < *newest) && !self.bugs.pays_stale;
+			if !ignored {
+				let mark = if self.bugs.locks_out_future { created } else { created.min(now) };
+				*newest = (*newest).max(mark);
+			}
+			ignored
+		};
+		if ignored {
 			return;
 		}
 
