@@ -159,6 +159,23 @@ impl Context {
 		self.shared.iter().filter(|exchange| exchange.method == method).cloned().collect()
 	}
 
+	/// The connection's remaining budget in msats, from get_budget or --budget-sats, or None
+	/// when it has no budget or none is known.
+	pub async fn remaining_budget(&self) -> Result<Option<u64>, String> {
+		if self.supports("get_budget") {
+			let reply = self.wallet.send(Request::new("get_budget", self.encryption())).await;
+			let result = match &reply {
+				Ok(reply) if reply.error().is_none() => reply.result().cloned().unwrap_or_default(),
+				_ => return Err(describe(&reply)),
+			};
+			let field = |name| result.get(name).and_then(serde_json::Value::as_u64);
+			if let Some(total) = field("total_budget") {
+				return Ok(Some(total.saturating_sub(field("used_budget").unwrap_or(0))));
+			}
+		}
+		Ok(self.payments.as_ref().ok().and_then(|payments| payments.wallet_budget_msat))
+	}
+
 	pub fn supports(&self, method: &str) -> bool {
 		self.methods.iter().any(|m| m == method)
 	}
