@@ -2,12 +2,13 @@ use nostr_sdk::prelude::Timestamp;
 use serde_json::Value;
 
 use super::{Context, describe};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::wallet::Scheme;
 
 const INFO_EVENT: Check = Check::new(
 	"DISC-01",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"Info event is published",
 	"Apps learn what the wallet supports from this event.",
@@ -15,6 +16,7 @@ const INFO_EVENT: Check = Check::new(
 const METHODS: Check = Check::new(
 	"DISC-02",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"Info event lists methods",
 	"Without it, apps can't tell which requests the wallet accepts.",
@@ -22,6 +24,7 @@ const METHODS: Check = Check::new(
 const NIP44: Check = Check::new(
 	"DISC-03",
 	Level::Should,
+	Severity::Low,
 	Spec::Nip47,
 	"NIP-44 encryption is advertised",
 	"NIP-04 is deprecated; NIP-44 is the encryption clients should use.",
@@ -29,6 +32,7 @@ const NIP44: Check = Check::new(
 const GET_INFO_METHODS: Check = Check::new(
 	"DISC-04",
 	Level::Should,
+	Severity::Medium,
 	Spec::Nip47,
 	"get_info methods match the info event",
 	"Apps may call methods the wallet never advertised.",
@@ -36,6 +40,7 @@ const GET_INFO_METHODS: Check = Check::new(
 const NETWORK: Check = Check::new(
 	"DISC-05",
 	Level::Must,
+	Severity::High,
 	Spec::Nip47,
 	"get_info reports a valid network",
 	"Apps check the network so they never pay on the wrong chain.",
@@ -43,6 +48,7 @@ const NETWORK: Check = Check::new(
 const EXTENSIONS: Check = Check::new(
 	"DISC-06",
 	Level::Should,
+	Severity::Low,
 	Spec::Nip47,
 	"Extensions match between info event and get_info",
 	"Apps rely on extensions being advertised the same way in both places.",

@@ -6,7 +6,7 @@ use nostr_sdk::prelude::Keys;
 use serde_json::{Value, json};
 
 use super::{Context, describe, state, tracked};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::counterparty::{sha256, to_hex};
 use crate::evidence::track;
 use crate::wallet::Request;
@@ -18,6 +18,7 @@ const EXPIRY_SECS: u64 = 3600;
 const CREATE: Check = Check::new(
 	"CORE-01",
 	Level::Must,
+	Severity::High,
 	Spec::Nip47,
 	"make_invoice matches amount, description and expiry",
 	"A wrong amount or description makes the payer pay something other than what was asked.",
@@ -25,6 +26,7 @@ const CREATE: Check = Check::new(
 const DESCRIPTION_HASH: Check = Check::new(
 	"CORE-02",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"make_invoice sets the description_hash",
 	"Services like LNURL rely on the hash to bind the invoice to their request.",
@@ -32,6 +34,7 @@ const DESCRIPTION_HASH: Check = Check::new(
 const LOOKUP: Check = Check::new(
 	"CORE-03",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"lookup_invoice finds by payment_hash and invoice",
 	"Apps look invoices up either way to track their status.",
@@ -39,6 +42,7 @@ const LOOKUP: Check = Check::new(
 const SETTLE: Check = Check::new(
 	"CORE-04",
 	Level::Must,
+	Severity::High,
 	Spec::Nip47,
 	"lookup_invoice shows pending, then settled",
 	"Apps tell users they were paid from this state.",
@@ -46,6 +50,7 @@ const SETTLE: Check = Check::new(
 const UNKNOWN: Check = Check::new(
 	"CORE-05",
 	Level::Must,
+	Severity::Low,
 	Spec::Nip47,
 	"Unknown invoice returns NOT_FOUND",
 	"Clients need NOT_FOUND to tell a missing invoice from a failure.",

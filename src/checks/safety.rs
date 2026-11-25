@@ -2,13 +2,14 @@ use nostr_sdk::prelude::Timestamp;
 use serde_json::{Value, json};
 
 use super::{Context, OVER_BUDGET, describe, over_budget, state, tracked};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::counterparty::to_hex;
 use crate::wallet::{Request, WalletError};
 
 const EXPIRED: Check = Check::new(
 	"SAFE-01",
 	Level::Safety,
+	Severity::High,
 	Spec::Nip40,
 	"Expired requests are ignored",
 	"An expired payment request could be paid long after the user gave up on it.",
@@ -16,6 +17,7 @@ const EXPIRED: Check = Check::new(
 const DUPLICATE: Check = Check::new(
 	"SAFE-03",
 	Level::Safety,
+	Severity::Critical,
 	Spec::Safety,
 	"A duplicated pay_invoice is paid once",
 	"Relays can deliver the same request twice, and a wallet that pays every copy pays twice.",
@@ -24,6 +26,7 @@ const DUPLICATE: Check = Check::new(
 const STALE: Check = Check::new(
 	"SAFE-06",
 	Level::Safety,
+	Severity::High,
 	Spec::Safety,
 	"A stale pay_invoice is not paid",
 	"A relay, or anyone holding a captured request, can send it again long after it was signed, and a wallet with no age limit pays it again.",
@@ -36,6 +39,7 @@ const STALE_AGE_SECONDS: u64 = 60 * 60;
 const READONLY: Check = Check::new(
 	"SAFE-05",
 	Level::Safety,
+	Severity::Critical,
 	Spec::Nip47,
 	"A read-only connection can't pay",
 	"A connection the user granted no payment permission must never spend their funds.",
@@ -44,6 +48,7 @@ const READONLY: Check = Check::new(
 const OVERRIDE: Check = Check::new(
 	"SAFE-04",
 	Level::Safety,
+	Severity::Critical,
 	Spec::Safety,
 	"amount can't change a fixed-amount invoice",
 	"A wallet that pays the amount param instead of the invoice amount can be made to overpay.",

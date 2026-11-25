@@ -104,11 +104,18 @@ fn seconds(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::check::{Check, Level, Spec};
+	use crate::check::{Check, Level, Severity, Spec};
 
-	const MUST: Check =
-		Check::new("T-01", Level::Must, Spec::Nip47, "Must & co", "Why it matters.");
-	const SHOULD: Check = Check::new("T-02", Level::Should, Spec::Safety, "Should", "Why.");
+	const MUST: Check = Check::new(
+		"T-01",
+		Level::Must,
+		Severity::High,
+		Spec::Nip47,
+		"Must & co",
+		"Why it matters.",
+	);
+	const SHOULD: Check =
+		Check::new("T-02", Level::Should, Severity::Low, Spec::Safety, "Should", "Why.");
 
 	fn report(strict: bool) -> Report {
 		let mut results =

@@ -110,10 +110,12 @@ fn iso8601(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::check::{Check, Level, Spec};
+	use crate::check::{Check, Level, Severity, Spec};
 
-	const PINNED: Check = Check::new("T-01", Level::Must, Spec::Nip47, "Pinned", "Why.");
-	const UNSPECIFIED: Check = Check::new("T-02", Level::Safety, Spec::Safety, "Unpinned", "Why.");
+	const PINNED: Check =
+		Check::new("T-01", Level::Must, Severity::High, Spec::Nip47, "Pinned", "Why.");
+	const UNSPECIFIED: Check =
+		Check::new("T-02", Level::Safety, Severity::Medium, Spec::Safety, "Unpinned", "Why.");
 
 	fn report() -> Report {
 		let mut results = vec![PINNED.pass("ok"), UNSPECIFIED.fail("bad")];
@@ -131,6 +133,16 @@ mod tests {
 	#[test]
 	fn escaping_drops_control_characters() {
 		assert_eq!(escape("a<b & \"c\"\u{0}\u{1b}"), "a&lt;b &amp; &quot;c&quot;");
+	}
+
+	#[test]
+	fn summary_counts_problems_by_severity() {
+		let json: serde_json::Value = serde_json::from_str(&report().to_json()).unwrap();
+		assert_eq!(json["results"][0]["severity"], "high");
+		let problems = &json["summary"]["problems"];
+		assert_eq!(problems["high"], 0, "a pass isn't a problem");
+		assert_eq!(problems["medium"], 1);
+		assert_eq!(problems["critical"], 0);
 	}
 
 	#[test]

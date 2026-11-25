@@ -2,13 +2,14 @@ use nostr_sdk::prelude::Keys;
 use serde_json::json;
 
 use super::{Context, UNKNOWN_METHOD, describe};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::evidence::track;
 use crate::wallet::{Reply, Request, WalletError};
 
 const NOT_IMPLEMENTED: Check = Check::new(
 	"ERR-01",
 	Level::Should,
+	Severity::Low,
 	Spec::Nip47,
 	"Unknown method returns NOT_IMPLEMENTED",
 	"Clients need NOT_IMPLEMENTED to know a feature is missing.",
@@ -16,6 +17,7 @@ const NOT_IMPLEMENTED: Check = Check::new(
 const UNAUTHORIZED: Check = Check::new(
 	"ERR-02",
 	Level::Should,
+	Severity::Low,
 	Spec::Nip47,
 	"Unknown client returns UNAUTHORIZED",
 	"Requests from keys that aren't connected must be clearly refused.",
@@ -23,6 +25,7 @@ const UNAUTHORIZED: Check = Check::new(
 const MALFORMED: Check = Check::new(
 	"ERR-03",
 	Level::Safety,
+	Severity::Medium,
 	Spec::Nip47,
 	"Malformed params return an error",
 	"Ignoring bad input hides bugs and leaves clients waiting.",

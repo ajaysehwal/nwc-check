@@ -2,13 +2,14 @@ use serde_json::{Value, json};
 
 use super::payments::result_field;
 use super::{Context, Payments, describe};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::evidence::track;
 use crate::wallet::Request;
 
 const BALANCE: Check = Check::new(
 	"CORE-09",
 	Level::Safety,
+	Severity::High,
 	Spec::Nip47,
 	"Balance drops by the amount plus fees_paid",
 	"A wallet that charges more than it reports takes money the user can't see.",
@@ -16,6 +17,7 @@ const BALANCE: Check = Check::new(
 const BUDGET_USE: Check = Check::new(
 	"EXT13-04",
 	Level::Safety,
+	Severity::High,
 	Spec::Nwc13,
 	"used_budget rises by the amount plus fees_paid",
 	"A budget that leaves out fees lets a connection spend more than the user allowed.",

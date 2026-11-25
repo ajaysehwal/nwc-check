@@ -200,9 +200,10 @@ fn mark(status: Status) -> &'static str {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::check::{Check, Spec};
+	use crate::check::{Check, Severity, Spec};
 
-	const CHECK: Check = Check::new("T-01", Level::Must, Spec::Nip47, "A check", "Why.");
+	const CHECK: Check =
+		Check::new("T-01", Level::Must, Severity::High, Spec::Nip47, "A check", "Why.");
 
 	#[test]
 	fn wallet_text_is_escaped() {
