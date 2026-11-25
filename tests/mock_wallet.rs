@@ -15,6 +15,7 @@ const PAYMENT_CHECKS: [&str; 13] = [
 ];
 const INVOICE_CHECKS: [&str; 5] = ["CORE-01", "CORE-02", "CORE-03", "CORE-04", "CORE-05"];
 const NWC13_CHECKS: [&str; 3] = ["EXT13-01", "EXT13-02", "EXT13-03"];
+const CONNECTION_CHECKS: [&str; 1] = ["SAFE-07"];
 
 struct Run {
 	bugs: Bugs,
@@ -72,7 +73,9 @@ async fn compliant_wallet_has_no_failures() {
 	let problems: Vec<&Outcome> = outcomes.iter().filter(|outcome| outcome.is_problem()).collect();
 	assert!(problems.is_empty(), "{problems:#?}");
 	assert_eq!(outcomes.len(), checks::catalog().len());
-	for id in PAYMENT_CHECKS.iter().chain(&INVOICE_CHECKS).chain(&NWC13_CHECKS) {
+	for id in
+		PAYMENT_CHECKS.iter().chain(&INVOICE_CHECKS).chain(&NWC13_CHECKS).chain(&CONNECTION_CHECKS)
+	{
 		assert_eq!(status(&outcomes, id), Status::Pass, "{id}");
 	}
 }
@@ -183,6 +186,7 @@ async fn each_bug_is_caught_on_its_own() {
 		("CORE-09", Bugs { hidden_fee: true, ..none }),
 		("SAFE-05", Bugs { ignores_permissions: true, ..none }),
 		("SAFE-04", Bugs { pays_amount_param: true, ..none }),
+		("SAFE-07", Bugs { grants_any_connection: true, ..none }),
 		("SAFE-06", Bugs { pays_stale: true, ..none }),
 		("EXT13-01", Bugs { budget_missing_from_get_info: true, ..none }),
 		("EXT13-02", Bugs { budget_without_total: true, ..none }),

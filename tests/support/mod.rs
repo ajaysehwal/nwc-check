@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 
 const FEE_MSAT: u64 = 1000;
 
-const METHODS: [&str; 7] = [
+const METHODS: [&str; 8] = [
 	"get_info",
 	"get_balance",
 	"make_invoice",
@@ -31,6 +31,7 @@ const METHODS: [&str; 7] = [
 	"pay_invoice",
 	"list_transactions",
 	"get_budget",
+	"create_connection",
 ];
 
 #[derive(Clone, Copy, Default)]
@@ -56,6 +57,7 @@ pub struct Bugs {
 	pub renews_at_missing: bool,
 	pub budget_ignores_fees: bool,
 	pub pays_amount_param: bool,
+	pub grants_any_connection: bool,
 	pub pays_stale: bool,
 }
 
@@ -83,6 +85,7 @@ impl Bugs {
 			renews_at_missing: true,
 			budget_ignores_fees: true,
 			pays_amount_param: true,
+			grants_any_connection: true,
 			pays_stale: true,
 			..Self::default()
 		}
@@ -380,6 +383,7 @@ impl MockWallet {
 			"lookup_invoice" => self.lookup_invoice(&body["params"]),
 			"pay_invoice" => self.pay(&body["params"]).await,
 			"get_budget" => Ok(self.get_budget()),
+			"create_connection" => self.create_connection(&body["params"]),
 			"list_transactions" => Ok(self.list_transactions()),
 			_ if self.bugs.wrong_error_code => error("OTHER"),
 			_ => error("NOT_IMPLEMENTED"),
@@ -471,6 +475,25 @@ impl MockWallet {
 			)
 			.collect();
 		json!({ "transactions": transactions })
+	}
+
+	/// Creates a connection only within this connection's own methods and remaining budget.
+	fn create_connection(&self, params: &Value) -> Result<Value, Value> {
+		let granted = json!({ "wallet_pubkey": Keys::generate().public_key().to_hex() });
+		if self.bugs.grants_any_connection {
+			return Ok(granted);
+		}
+		let methods = params["request_methods"].as_array().cloned().unwrap_or_default();
+		let unknown = methods.iter().any(|method| {
+			let method = method.as_str().unwrap_or_default();
+			method == "create_connection" || !METHODS.contains(&method)
+		});
+		let max_amount = params["max_amount"].as_u64().unwrap_or(0);
+		let over_budget = self.budget.as_ref().is_some_and(|budget| {
+			let budget = budget.lock().unwrap();
+			max_amount > budget.total_msat.saturating_sub(budget.used_msat)
+		});
+		if unknown || over_budget { Err(error_value("RESTRICTED")) } else { Ok(granted) }
 	}
 
 	fn get_budget(&self) -> Value {
