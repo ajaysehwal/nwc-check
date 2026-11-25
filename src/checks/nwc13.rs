@@ -2,7 +2,7 @@ use nostr_sdk::prelude::Timestamp;
 use serde_json::{Map, Value};
 
 use super::{Context, describe};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::evidence::track;
 use crate::wallet::Request;
 
@@ -11,6 +11,7 @@ const PERIODS: [&str; 5] = ["daily", "weekly", "monthly", "yearly", "never"];
 const ADVERTISED: Check = Check::new(
 	"EXT13-01",
 	Level::Must,
+	Severity::Low,
 	Spec::Nwc13,
 	"get_budget is listed in the info event and get_info",
 	"Apps only call get_budget when both list it.",
@@ -18,6 +19,7 @@ const ADVERTISED: Check = Check::new(
 const SHAPE: Check = Check::new(
 	"EXT13-02",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nwc13,
 	"get_budget is empty or has every required field",
 	"An empty result means no budget, so a configured budget must never look empty or partial.",
@@ -25,6 +27,7 @@ const SHAPE: Check = Check::new(
 const RENEWAL: Check = Check::new(
 	"EXT13-03",
 	Level::Must,
+	Severity::Low,
 	Spec::Nwc13,
 	"A renewing budget has renews_at, a never budget doesn't",
 	"Apps tell users when their allowance resets from renews_at.",

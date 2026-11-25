@@ -149,51 +149,62 @@ Then pass the printed connection string to `nwc-check run` in another terminal.
 
 Each check has a level: `MUST` and `SAFETY` problems are failures, `SHOULD` problems are warnings. `SAFETY` checks cover behavior the spec doesn't require but that protects funds.
 
+Each check also has a severity: how much harm a problem can do to the user, which tells you what to fix first. The level decides whether a problem fails or warns; the severity doesn't change that.
+
+| Severity | Meaning |
+|---|---|
+| `CRITICAL` | Funds can be lost beyond what the user allowed |
+| `HIGH` | Money can be wrong, lost or misreported |
+| `MEDIUM` | Apps can break or misread the wallet |
+| `LOW` | A detail that rarely affects users |
+
+Problems are listed most severe first, the summary counts them by severity, and every report format shows it: `severity` and `summary.problems` in JSON, a badge in HTML, and the failure `type` plus a `severity` property in JUnit.
+
 Each check also names the spec it comes from, pinned to the commit it was written against: NIP-47 [`c53877571f96`](https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md), NIP-40 [`f5a15ea27e06`](https://github.com/nostr-protocol/nips/blob/f5a15ea27e06/40.md) or NWC-13 [`36ab132bbce1`](https://github.com/nostr-wallet-connect/nwc/blob/36ab132bbce1/13.md). SAFE-02, SAFE-03, SAFE-04 and SAFE-06 have none. The spec appears in `nwc-check list`, in the JSON `spec` field, and under each problem in the text output.
 
 The JSON report also records evidence for each check: every request it sent, as `method`, `request` and `reply` event IDs and `ms`, plus the check's total `duration_ms`. Use the event IDs to find the exact events on the relay. Checks built on the shared `get_info` reply cite that exchange. Checks that send nothing, such as DISC-01, have none.
 
-| ID | Level | Check |
-|---|---|---|
-| DISC-01 | MUST | Info event is published |
-| DISC-02 | MUST | Info event lists methods |
-| DISC-03 | SHOULD | NIP-44 encryption is advertised |
-| DISC-04 | SHOULD | get_info methods match the info event |
-| DISC-05 | MUST | get_info reports a valid network |
-| DISC-06 | SHOULD | Extensions match between info event and get_info |
-| ENC-01 | MUST | NIP-44 request gets a NIP-44 reply |
-| ENC-02 | MUST | NIP-04 request gets a NIP-04 reply |
-| ENC-03 | MUST | Unsupported scheme returns UNSUPPORTED_ENCRYPTION |
-| ENC-04 | MUST | Untagged request is treated as NIP-04 |
-| RESP-01 | MUST | result_type matches the method |
-| RESP-02 | MUST | Successful reply has a null error |
-| RESP-03 | MUST | Error has a code and a message |
-| RESP-04 | SHOULD | Reply references the request and client |
-| RESP-05 | MUST | get_balance returns a balance in msats |
-| ERR-01 | SHOULD | Unknown method returns NOT_IMPLEMENTED |
-| ERR-02 | SHOULD | Unknown client returns UNAUTHORIZED |
-| ERR-03 | SAFETY | Malformed params return an error |
-| SAFE-01 | SAFETY | Expired requests are ignored |
-| SAFE-03 | SAFETY | A duplicated pay_invoice is paid once |
-| SAFE-02 | SAFETY | Concurrent payments stay within the budget |
-| SAFE-04 | SAFETY | amount can't change a fixed-amount invoice |
-| SAFE-05 | SAFETY | A read-only connection can't pay |
-| SAFE-06 | SAFETY | A stale pay_invoice is not paid |
-| EXT13-01 | MUST | get_budget is listed in the info event and get_info |
-| EXT13-02 | MUST | get_budget is empty or has every required field |
-| EXT13-03 | MUST | A renewing budget has renews_at, a never budget doesn't |
-| EXT13-04 | SAFETY | used_budget rises by the amount plus fees_paid |
-| CORE-01 | MUST | make_invoice matches amount, description and expiry |
-| CORE-02 | MUST | make_invoice sets the description_hash |
-| CORE-03 | MUST | lookup_invoice finds by payment_hash and invoice |
-| CORE-04 | MUST | lookup_invoice shows pending, then settled |
-| CORE-05 | MUST | Unknown invoice returns NOT_FOUND |
-| PAY-01 | MUST | make_invoice returns a payable invoice |
-| PAY-02 | MUST | pay_invoice delivers the payment |
-| PAY-03 | SAFETY | pay_invoice returns the matching preimage |
-| CORE-07 | SHOULD | pay_invoice reports plausible fees_paid |
-| CORE-08 | MUST | pay_invoice pays the amount given for an amountless invoice |
-| CORE-09 | SAFETY | Balance drops by the amount plus fees_paid |
+| ID | Severity | Level | Check |
+|---|---|---|---|
+| DISC-01 | MEDIUM | MUST | Info event is published |
+| DISC-02 | MEDIUM | MUST | Info event lists methods |
+| DISC-03 | LOW | SHOULD | NIP-44 encryption is advertised |
+| DISC-04 | MEDIUM | SHOULD | get_info methods match the info event |
+| DISC-05 | HIGH | MUST | get_info reports a valid network |
+| DISC-06 | LOW | SHOULD | Extensions match between info event and get_info |
+| ENC-01 | MEDIUM | MUST | NIP-44 request gets a NIP-44 reply |
+| ENC-02 | MEDIUM | MUST | NIP-04 request gets a NIP-04 reply |
+| ENC-03 | LOW | MUST | Unsupported scheme returns UNSUPPORTED_ENCRYPTION |
+| ENC-04 | MEDIUM | MUST | Untagged request is treated as NIP-04 |
+| RESP-01 | MEDIUM | MUST | result_type matches the method |
+| RESP-02 | MEDIUM | MUST | Successful reply has a null error |
+| RESP-03 | LOW | MUST | Error has a code and a message |
+| RESP-04 | MEDIUM | SHOULD | Reply references the request and client |
+| RESP-05 | MEDIUM | MUST | get_balance returns a balance in msats |
+| ERR-01 | LOW | SHOULD | Unknown method returns NOT_IMPLEMENTED |
+| ERR-02 | LOW | SHOULD | Unknown client returns UNAUTHORIZED |
+| ERR-03 | MEDIUM | SAFETY | Malformed params return an error |
+| SAFE-01 | HIGH | SAFETY | Expired requests are ignored |
+| SAFE-03 | CRITICAL | SAFETY | A duplicated pay_invoice is paid once |
+| SAFE-02 | CRITICAL | SAFETY | Concurrent payments stay within the budget |
+| SAFE-04 | CRITICAL | SAFETY | amount can't change a fixed-amount invoice |
+| SAFE-05 | CRITICAL | SAFETY | A read-only connection can't pay |
+| SAFE-06 | HIGH | SAFETY | A stale pay_invoice is not paid |
+| EXT13-01 | LOW | MUST | get_budget is listed in the info event and get_info |
+| EXT13-02 | MEDIUM | MUST | get_budget is empty or has every required field |
+| EXT13-03 | LOW | MUST | A renewing budget has renews_at, a never budget doesn't |
+| EXT13-04 | HIGH | SAFETY | used_budget rises by the amount plus fees_paid |
+| CORE-01 | HIGH | MUST | make_invoice matches amount, description and expiry |
+| CORE-02 | MEDIUM | MUST | make_invoice sets the description_hash |
+| CORE-03 | MEDIUM | MUST | lookup_invoice finds by payment_hash and invoice |
+| CORE-04 | HIGH | MUST | lookup_invoice shows pending, then settled |
+| CORE-05 | LOW | MUST | Unknown invoice returns NOT_FOUND |
+| PAY-01 | HIGH | MUST | make_invoice returns a payable invoice |
+| PAY-02 | HIGH | MUST | pay_invoice delivers the payment |
+| PAY-03 | HIGH | SAFETY | pay_invoice returns the matching preimage |
+| CORE-07 | LOW | SHOULD | pay_invoice reports plausible fees_paid |
+| CORE-08 | CRITICAL | MUST | pay_invoice pays the amount given for an amountless invoice |
+| CORE-09 | HIGH | SAFETY | Balance drops by the amount plus fees_paid |
 
 Checks for methods or encryption schemes the wallet doesn't advertise are skipped. A reply without an `e` tag can't be matched to its request; it's reported as such, and RESP-04 warns, rather than looking like no reply. SAFE-01 is skipped when the relays drop expired events themselves (NIP-40), since the wallet never sees the request. Payment checks, CORE-04, CORE-07 to CORE-09, SAFE-02 to SAFE-06 and EXT13-04, which move funds, are skipped without a counterparty and `--allow-spend`, and on mainnet. Invoice checks decode the returned BOLT11 invoice rather than trusting the reply's fields.
 
@@ -220,7 +231,7 @@ src/
 ├── ui.rs          Terminal output: progress, sections, problems, summary
 ├── lib.rs
 ├── wallet.rs      Sends raw NIP-47 requests and decrypts replies
-├── check.rs       Check, Level, Spec, Status, Outcome and Summary types
+├── check.rs       Check, Level, Severity, Spec, Status, Outcome and Summary types
 ├── evidence.rs    Records the requests each check sends
 ├── report/        JSON, HTML and JUnit reports
 ├── counterparty/  Node that pays and gets paid by the wallet (Counterparty trait, LND client)

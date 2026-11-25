@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use console::{Style, style};
 use indicatif::{ProgressBar, ProgressStyle};
-use nwc_check::check::{Level, Outcome, Status, Summary};
+use nwc_check::check::{Level, Outcome, Severity, Status, Summary};
 use nwc_check::checks::{self, Section};
 
 pub struct Ui {
@@ -77,16 +77,17 @@ impl Ui {
 		if problems.is_empty() {
 			return;
 		}
-		problems.sort_by_key(|o| (o.status != Status::Fail, o.level != Level::Safety));
+		problems.sort_by_key(|o| (o.severity, o.status != Status::Fail));
 
 		let mut out = format!("\n{}", style(format!("Problems found ({})", problems.len())).bold());
 		for problem in problems {
 			out.push_str(&format!(
-				"\n\n  {} {} {}  {}\n    {}  {}\n    {}  {}",
+				"\n\n  {} {} {}  {} {}\n    {}  {}\n    {}  {}",
 				mark(problem.status),
 				style(problem.id).bold(),
 				problem.title,
-				level_badge(problem.level).to_string().trim_end(),
+				severity_badge(problem.severity),
+				style(format!("· {}", problem.level.as_str())).dim(),
 				style("Found").dim(),
 				problem.detail,
 				style("Why  ").dim(),
@@ -116,6 +117,19 @@ impl Ui {
 			style(summary.skipped).dim(),
 			style(format!("({})", human_duration(elapsed))).dim(),
 		));
+		let by_severity: Vec<String> = Severity::ALL
+			.into_iter()
+			.filter(|&severity| summary.problems.get(severity) > 0)
+			.map(|severity| {
+				let count = summary.problems.get(severity);
+				severity_style(severity)
+					.apply_to(format!("{count} {}", severity.as_str().to_lowercase()))
+					.to_string()
+			})
+			.collect();
+		if !by_severity.is_empty() {
+			self.print(format!("  {}", by_severity.join(" · ")));
+		}
 	}
 
 	pub fn saved(&self, label: &str, path: &Path) {
@@ -140,8 +154,9 @@ pub fn catalog() -> String {
 		for check in section.checks() {
 			let spec = check.spec.id().unwrap_or("safety, no spec");
 			out.push_str(&format!(
-				"  {:<8} {}  {:<width$}  {}\n",
+				"  {:<8} {}  {}  {:<width$}  {}\n",
 				check.id,
+				severity_style(check.severity).apply_to(format!("{:<8}", check.severity.as_str())),
 				level_badge(check.level),
 				check.title,
 				style(spec).dim(),
@@ -168,6 +183,19 @@ fn status_style(status: Status) -> Style {
 		Status::Warn => Style::new().yellow(),
 		Status::Fail => Style::new().red(),
 		Status::Skip => Style::new().dim(),
+	}
+}
+
+fn severity_badge(severity: Severity) -> console::StyledObject<&'static str> {
+	severity_style(severity).apply_to(severity.as_str())
+}
+
+fn severity_style(severity: Severity) -> Style {
+	match severity {
+		Severity::Critical => Style::new().red().bold(),
+		Severity::High => Style::new().red(),
+		Severity::Medium => Style::new().yellow(),
+		Severity::Low => Style::new().dim(),
 	}
 }
 

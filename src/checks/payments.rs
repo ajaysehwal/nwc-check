@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use super::{Context, OVER_BUDGET, Payments, describe, over_budget, tracked};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::counterparty::{PayError, from_hex, sha256};
 use crate::wallet::{Reply, Request, WalletError};
 
@@ -10,6 +10,7 @@ const MEMO: &str = "nwc-check";
 const RECEIVE: Check = Check::new(
 	"PAY-01",
 	Level::Must,
+	Severity::High,
 	Spec::Nip47,
 	"make_invoice returns a payable invoice",
 	"Users share this invoice to get paid; if it can't be paid, the payment is lost.",
@@ -17,6 +18,7 @@ const RECEIVE: Check = Check::new(
 const SEND: Check = Check::new(
 	"PAY-02",
 	Level::Must,
+	Severity::High,
 	Spec::Nip47,
 	"pay_invoice delivers the payment",
 	"Apps report a payment as sent based on this reply.",
@@ -24,6 +26,7 @@ const SEND: Check = Check::new(
 const PREIMAGE: Check = Check::new(
 	"PAY-03",
 	Level::Safety,
+	Severity::High,
 	Spec::Nip47,
 	"pay_invoice returns the matching preimage",
 	"The preimage is the user's proof that the invoice was paid.",
@@ -31,6 +34,7 @@ const PREIMAGE: Check = Check::new(
 const FEES: Check = Check::new(
 	"CORE-07",
 	Level::Should,
+	Severity::Low,
 	Spec::Nip47,
 	"pay_invoice reports plausible fees_paid",
 	"Apps show users what a payment cost from this field.",
@@ -38,6 +42,7 @@ const FEES: Check = Check::new(
 const AMOUNTLESS: Check = Check::new(
 	"CORE-08",
 	Level::Must,
+	Severity::Critical,
 	Spec::Nip47,
 	"pay_invoice pays the amount given for an amountless invoice",
 	"Paying any other amount loses money or underpays the recipient.",

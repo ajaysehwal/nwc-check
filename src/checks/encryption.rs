@@ -1,11 +1,12 @@
 use super::{Context, describe};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::evidence::track;
 use crate::wallet::{Encryption, Reply, Request, Scheme, WalletError};
 
 const NIP44_REPLY: Check = Check::new(
 	"ENC-01",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"NIP-44 request gets a NIP-44 reply",
 	"A client can't read a reply encrypted differently from its request.",
@@ -13,6 +14,7 @@ const NIP44_REPLY: Check = Check::new(
 const NIP04_REPLY: Check = Check::new(
 	"ENC-02",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"NIP-04 request gets a NIP-04 reply",
 	"A client can't read a reply encrypted differently from its request.",
@@ -20,6 +22,7 @@ const NIP04_REPLY: Check = Check::new(
 const UNSUPPORTED: Check = Check::new(
 	"ENC-03",
 	Level::Must,
+	Severity::Low,
 	Spec::Nip47,
 	"Unsupported scheme returns UNSUPPORTED_ENCRYPTION",
 	"Clients need this error to fall back to a scheme the wallet supports.",
@@ -27,6 +30,7 @@ const UNSUPPORTED: Check = Check::new(
 const UNTAGGED: Check = Check::new(
 	"ENC-04",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"Untagged request is treated as NIP-04",
 	"Older clients send no encryption tag and expect a NIP-04 reply.",

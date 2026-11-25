@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 
 use super::{Report, escape, utc};
-use crate::check::{Level, Outcome, Status};
+use crate::check::{Outcome, Severity, Status};
 use crate::evidence::Exchange;
 
 const STYLE: &str = r#"
@@ -39,6 +39,12 @@ table { width: 100%; border-collapse: collapse; }
 td { padding: 8px 6px; border-top: 1px solid var(--border); vertical-align: top; }
 td.status { width: 24px; }
 .level { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.severity { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; padding: 1px 6px;
+	border-radius: 4px; border: 1px solid currentColor; white-space: nowrap; }
+.severity.critical { color: var(--fail); background: color-mix(in srgb, var(--fail) 12%, transparent); }
+.severity.high { color: var(--fail); }
+.severity.medium { color: var(--warn); }
+.severity.low { color: var(--skip); }
 .detail { color: var(--muted); }
 .pass .mark { color: var(--pass); } .warn .mark { color: var(--warn); }
 .fail .mark { color: var(--fail); } .skip .mark { color: var(--skip); }
@@ -59,6 +65,7 @@ pub(super) fn render(report: &Report) -> String {
 		("All checks passed", "pass")
 	};
 
+	let tally = tally(report);
 	let _ = write!(
 		out,
 		"<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
@@ -68,7 +75,7 @@ pub(super) fn render(report: &Report) -> String {
 		<p class=\"meta\">Wallet <code>{}</code></p>\n\
 		<p class=\"meta\">Relays {}</p>\n\
 		<p class=\"meta\">{} · nwc-check {} · {} ms</p>\n\
-		<p class=\"verdict {class}\">{verdict}<span>{} passed · {} warnings · {} failed · {} skipped</span></p>\n",
+		<p class=\"verdict {class}\">{verdict}<span>{} passed · {} warnings · {} failed · {} skipped</span>{tally}</p>\n",
 		escape(&report.wallet),
 		escape(&report.relays.join(", ")),
 		utc(report.generated_at),
@@ -81,7 +88,7 @@ pub(super) fn render(report: &Report) -> String {
 	);
 
 	let mut problems: Vec<&Outcome> = report.results.iter().filter(|o| o.is_problem()).collect();
-	problems.sort_by_key(|o| (o.status != Status::Fail, o.level != Level::Safety));
+	problems.sort_by_key(|o| (o.severity, o.status != Status::Fail));
 	if !problems.is_empty() {
 		let _ = writeln!(out, "<h2>Problems found ({})</h2>", problems.len());
 		for problem in problems {
@@ -110,11 +117,12 @@ fn problem_card(out: &mut String, problem: &Outcome) {
 	let _ = write!(
 		out,
 		"<div class=\"problem {}\">\n<strong><span class=\"mark\">{}</span> <span class=\"id\">{}</span> {}</strong> \
-		<span class=\"level\">{}</span>\n<dl>\n<dt>Found</dt><dd>{}</dd>\n<dt>Why</dt><dd>{}</dd>\n",
+		{} <span class=\"level\">{}</span>\n<dl>\n<dt>Found</dt><dd>{}</dd>\n<dt>Why</dt><dd>{}</dd>\n",
 		class(problem.status),
 		mark(problem.status),
 		escape(problem.id),
 		escape(problem.title),
+		severity_badge(problem.severity),
 		problem.level.as_str(),
 		escape(&problem.detail),
 		escape(problem.why),
@@ -156,7 +164,8 @@ fn result_row(out: &mut String, outcome: &Outcome) {
 	}
 	let _ = writeln!(
 		out,
-		"</td><td class=\"level-cell level\">{} · {spec}</td><td class=\"time level\">{time}</td></tr>",
+		"</td><td class=\"level-cell level\">{} {} · {spec}</td><td class=\"time level\">{time}</td></tr>",
+		severity_badge(outcome.severity),
 		outcome.level.as_str(),
 	);
 }
@@ -177,6 +186,28 @@ fn evidence_list(out: &mut String, exchanges: &[Exchange]) {
 		);
 	}
 	out.push_str("</ul>");
+}
+
+fn severity_badge(severity: Severity) -> String {
+	let name = severity.as_str();
+	format!("<span class=\"severity {}\">{name}</span>", name.to_lowercase())
+}
+
+/// Problem counts by severity for the verdict banner, e.g. "1 critical · 2 high".
+fn tally(report: &Report) -> String {
+	let counts: Vec<String> = Severity::ALL
+		.into_iter()
+		.filter(|&severity| report.summary.problems.get(severity) > 0)
+		.map(|severity| {
+			let count = report.summary.problems.get(severity);
+			format!("{count} {}", severity.as_str().to_lowercase())
+		})
+		.collect();
+	if counts.is_empty() {
+		String::new()
+	} else {
+		format!("<br><span>{}</span>", counts.join(" · "))
+	}
 }
 
 fn class(status: Status) -> &'static str {
@@ -200,9 +231,10 @@ fn mark(status: Status) -> &'static str {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::check::{Check, Spec};
+	use crate::check::{Check, Level, Severity, Spec};
 
-	const CHECK: Check = Check::new("T-01", Level::Must, Spec::Nip47, "A check", "Why.");
+	const CHECK: Check =
+		Check::new("T-01", Level::Must, Severity::High, Spec::Nip47, "A check", "Why.");
 
 	#[test]
 	fn wallet_text_is_escaped() {
@@ -214,5 +246,7 @@ mod tests {
 		assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
 		assert!(html.contains("Wallet has problems"));
 		assert!(html.contains("https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md"));
+		assert!(html.contains("<span class=\"severity high\">HIGH</span>"));
+		assert!(html.contains("<br><span>1 high</span>"));
 	}
 }

@@ -54,8 +54,10 @@ fn testcase(out: &mut String, report: &Report, outcome: &Outcome) {
 	);
 	let _ = writeln!(
 		out,
-		"      <properties>\n        <property name=\"level\" value=\"{}\"/>\n        \
+		"      <properties>\n        <property name=\"severity\" value=\"{}\"/>\n        \
+		<property name=\"level\" value=\"{}\"/>\n        \
 		<property name=\"spec\" value=\"{}\"/>\n      </properties>",
+		outcome.severity.as_str(),
 		outcome.level.as_str(),
 		escape(outcome.spec.id().unwrap_or("none")),
 	);
@@ -63,7 +65,7 @@ fn testcase(out: &mut String, report: &Report, outcome: &Outcome) {
 		let _ = writeln!(
 			out,
 			"      <failure type=\"{}\" message=\"{}\">{}</failure>",
-			outcome.level.as_str(),
+			outcome.severity.as_str(),
 			escape(&outcome.detail),
 			escape(&explanation(outcome)),
 		);
@@ -104,11 +106,18 @@ fn seconds(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::check::{Check, Level, Spec};
+	use crate::check::{Check, Level, Severity, Spec};
 
-	const MUST: Check =
-		Check::new("T-01", Level::Must, Spec::Nip47, "Must & co", "Why it matters.");
-	const SHOULD: Check = Check::new("T-02", Level::Should, Spec::Safety, "Should", "Why.");
+	const MUST: Check = Check::new(
+		"T-01",
+		Level::Must,
+		Severity::High,
+		Spec::Nip47,
+		"Must & co",
+		"Why it matters.",
+	);
+	const SHOULD: Check =
+		Check::new("T-02", Level::Should, Severity::Low, Spec::Safety, "Should", "Why.");
 
 	fn report(strict: bool) -> Report {
 		let mut results =
@@ -124,7 +133,7 @@ mod tests {
 		assert!(xml.contains("tests=\"3\" failures=\"1\" skipped=\"1\" time=\"1.500\""));
 		assert!(xml.contains("name=\"T-01 Must &amp; co\""));
 		assert!(xml.contains(
-			"<failure type=\"MUST\" message=\"got &lt;nothing&gt;\">Why: Why it matters."
+			"<failure type=\"HIGH\" message=\"got &lt;nothing&gt;\">Why: Why it matters."
 		));
 		assert!(
 			xml.contains("Spec: https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md")
@@ -137,6 +146,7 @@ mod tests {
 	fn warnings_fail_in_strict_mode() {
 		let xml = render(&report(true));
 		assert!(xml.contains("failures=\"2\""));
-		assert!(xml.contains("<failure type=\"SHOULD\" message=\"meh\">"));
+		assert!(xml.contains("<failure type=\"LOW\" message=\"meh\">"));
+		assert!(xml.contains("<property name=\"severity\" value=\"LOW\"/>"));
 	}
 }

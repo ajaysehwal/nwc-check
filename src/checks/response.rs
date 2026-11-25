@@ -1,12 +1,13 @@
 use serde_json::Value;
 
 use super::{Context, describe, tracked};
-use crate::check::{Check, Level, Outcome, Spec};
+use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::wallet::{Reply, Request, WalletError};
 
 const RESULT_TYPE: Check = Check::new(
 	"RESP-01",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"result_type matches the method",
 	"Clients match a reply to its method by result_type.",
@@ -14,6 +15,7 @@ const RESULT_TYPE: Check = Check::new(
 const NULL_ERROR: Check = Check::new(
 	"RESP-02",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"Successful reply has a null error",
 	"A non-null error makes clients treat a success as a failure.",
@@ -21,6 +23,7 @@ const NULL_ERROR: Check = Check::new(
 const ERROR_SHAPE: Check = Check::new(
 	"RESP-03",
 	Level::Must,
+	Severity::Low,
 	Spec::Nip47,
 	"Error has a code and a message",
 	"Clients show the message to users and act on the code.",
@@ -28,6 +31,7 @@ const ERROR_SHAPE: Check = Check::new(
 const TAGS: Check = Check::new(
 	"RESP-04",
 	Level::Should,
+	Severity::Medium,
 	Spec::Nip47,
 	"Reply references the request and client",
 	"Without e and p tags, clients can't match replies to their requests.",
@@ -35,6 +39,7 @@ const TAGS: Check = Check::new(
 const BALANCE: Check = Check::new(
 	"RESP-05",
 	Level::Must,
+	Severity::Medium,
 	Spec::Nip47,
 	"get_balance returns a balance in msats",
 	"Apps show this balance to users.",

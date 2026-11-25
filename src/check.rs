@@ -20,6 +20,33 @@ impl Level {
 	}
 }
 
+/// How much harm a problem can do to the user, which decides what to fix first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+	/// Funds can be lost beyond what the user allowed.
+	Critical,
+	/// Money can be wrong, lost or misreported.
+	High,
+	/// Apps can break or misread the wallet.
+	Medium,
+	/// A detail that rarely affects users.
+	Low,
+}
+
+impl Severity {
+	pub const ALL: [Severity; 4] = [Self::Critical, Self::High, Self::Medium, Self::Low];
+
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Critical => "CRITICAL",
+			Self::High => "HIGH",
+			Self::Medium => "MEDIUM",
+			Self::Low => "LOW",
+		}
+	}
+}
+
 /// The spec a check comes from, pinned to the commit the check was written against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Spec {
@@ -71,6 +98,7 @@ pub enum Status {
 pub struct Check {
 	pub id: &'static str,
 	pub level: Level,
+	pub severity: Severity,
 	pub spec: Spec,
 	pub title: &'static str,
 	pub why: &'static str,
@@ -80,11 +108,12 @@ impl Check {
 	pub const fn new(
 		id: &'static str,
 		level: Level,
+		severity: Severity,
 		spec: Spec,
 		title: &'static str,
 		why: &'static str,
 	) -> Self {
-		Self { id, level, spec, title, why }
+		Self { id, level, severity, spec, title, why }
 	}
 
 	pub fn pass(&self, detail: impl Into<String>) -> Outcome {
@@ -109,6 +138,7 @@ impl Check {
 			id: self.id,
 			section: "",
 			level: self.level,
+			severity: self.severity,
 			spec: self.spec,
 			title: self.title,
 			duration_ms: None,
@@ -125,6 +155,7 @@ pub struct Outcome {
 	pub id: &'static str,
 	pub section: &'static str,
 	pub level: Level,
+	pub severity: Severity,
 	pub spec: Spec,
 	pub title: &'static str,
 	pub why: &'static str,
@@ -159,6 +190,36 @@ pub struct Summary {
 	pub warnings: usize,
 	pub failed: usize,
 	pub skipped: usize,
+	/// Failures and warnings, by severity.
+	pub problems: BySeverity,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct BySeverity {
+	pub critical: usize,
+	pub high: usize,
+	pub medium: usize,
+	pub low: usize,
+}
+
+impl BySeverity {
+	pub fn get(&self, severity: Severity) -> usize {
+		match severity {
+			Severity::Critical => self.critical,
+			Severity::High => self.high,
+			Severity::Medium => self.medium,
+			Severity::Low => self.low,
+		}
+	}
+
+	fn add(&mut self, severity: Severity) {
+		match severity {
+			Severity::Critical => self.critical += 1,
+			Severity::High => self.high += 1,
+			Severity::Medium => self.medium += 1,
+			Severity::Low => self.low += 1,
+		}
+	}
 }
 
 impl Summary {
@@ -170,6 +231,9 @@ impl Summary {
 				Status::Warn => summary.warnings += 1,
 				Status::Fail => summary.failed += 1,
 				Status::Skip => summary.skipped += 1,
+			}
+			if outcome.is_problem() {
+				summary.problems.add(outcome.severity);
 			}
 		}
 		summary
