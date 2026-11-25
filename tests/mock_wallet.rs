@@ -75,6 +75,7 @@ async fn compliant_wallet_has_no_failures() {
 	for id in PAYMENT_CHECKS.iter().chain(&INVOICE_CHECKS).chain(&NWC13_CHECKS) {
 		assert_eq!(status(&outcomes, id), Status::Pass, "{id}");
 	}
+	assert_eq!(status(&outcomes, "SAFE-07"), Status::Pass);
 }
 
 #[tokio::test]
@@ -83,6 +84,8 @@ async fn payment_checks_skip_without_counterparty() {
 	for id in PAYMENT_CHECKS {
 		assert_eq!(status(&outcomes, id), Status::Skip, "{id}");
 	}
+	// SAFE-07 moves no funds, so it needs no counterparty
+	assert_eq!(status(&outcomes, "SAFE-07"), Status::Pass);
 	assert_eq!(network.moved_msat(), 0);
 }
 
@@ -184,6 +187,7 @@ async fn each_bug_is_caught_on_its_own() {
 		("SAFE-05", Bugs { ignores_permissions: true, ..none }),
 		("SAFE-04", Bugs { pays_amount_param: true, ..none }),
 		("SAFE-06", Bugs { pays_stale: true, ..none }),
+		("SAFE-07", Bugs { locks_out_future: true, ..none }),
 		("EXT13-01", Bugs { budget_missing_from_get_info: true, ..none }),
 		("EXT13-02", Bugs { budget_without_total: true, ..none }),
 		("EXT13-03", Bugs { renews_at_missing: true, ..none }),

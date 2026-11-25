@@ -1,4 +1,5 @@
 mod budget;
+mod clock;
 mod discovery;
 mod encryption;
 mod errors;
@@ -192,10 +193,11 @@ pub enum Section {
 	Nwc13,
 	Ledger,
 	Budget,
+	Clock,
 }
 
 impl Section {
-	pub const ALL: [Section; 10] = [
+	pub const ALL: [Section; 11] = [
 		Self::Discovery,
 		Self::Encryption,
 		Self::Responses,
@@ -206,6 +208,7 @@ impl Section {
 		Self::Nwc13,
 		Self::Ledger,
 		Self::Budget,
+		Self::Clock,
 	];
 
 	pub fn title(self) -> &'static str {
@@ -220,6 +223,7 @@ impl Section {
 			Self::Nwc13 => "Connection budget (NWC-13)",
 			Self::Ledger => "Ledger",
 			Self::Budget => "Budget",
+			Self::Clock => "Request time",
 		}
 	}
 
@@ -235,6 +239,7 @@ impl Section {
 			Self::Nwc13 => nwc13::CHECKS,
 			Self::Ledger => ledger::CHECKS,
 			Self::Budget => budget::CHECKS,
+			Self::Clock => clock::CHECKS,
 		}
 	}
 
@@ -258,6 +263,7 @@ impl Section {
 			Self::Nwc13 => nwc13::run(ctx).await,
 			Self::Ledger => ledger::run(ctx).await,
 			Self::Budget => budget::run(ctx).await,
+			Self::Clock => clock::run(ctx).await,
 		}
 	}
 }
@@ -267,8 +273,9 @@ pub fn catalog() -> Vec<&'static Check> {
 }
 
 pub async fn run_by_section(ctx: &Context, mut on_section: impl FnMut(Section, Vec<Outcome>)) {
-	// Ledger compares balances and Budget uses up the budget, so each runs on its own at the end.
-	let (together, after) = Section::ALL.split_at(Section::ALL.len() - 2);
+	// Ledger compares balances, Budget uses up the budget and Clock can lock the wallet out for a
+	// while, so each runs on its own at the end.
+	let (together, after) = Section::ALL.split_at(Section::ALL.len() - 3);
 	let mut pending: FuturesUnordered<_> = together
 		.iter()
 		.enumerate()
