@@ -21,6 +21,18 @@ const DUPLICATE: Check = Check::new(
 	"Relays can deliver the same request twice, and a wallet that pays every copy pays twice.",
 );
 
+const STALE: Check = Check::new(
+	"SAFE-06",
+	Level::Safety,
+	Spec::Safety,
+	"A stale pay_invoice is not paid",
+	"A relay, or anyone holding a captured request, can send it again long after it was signed, and a wallet with no age limit pays it again.",
+);
+
+/// How far back the stale request is signed. A wallet that allows for clocks a few minutes
+/// off still has to refuse a request this old.
+const STALE_AGE_SECONDS: u64 = 60 * 60;
+
 const READONLY: Check = Check::new(
 	"SAFE-05",
 	Level::Safety,
@@ -37,16 +49,17 @@ const OVERRIDE: Check = Check::new(
 	"A wallet that pays the amount param instead of the invoice amount can be made to overpay.",
 );
 
-pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE, &OVERRIDE, &READONLY];
+pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE, &OVERRIDE, &STALE, &READONLY];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	let (expired, duplicate, overridden, readonly) = tokio::join!(
+	let (expired, duplicate, overridden, stale, readonly) = tokio::join!(
 		tracked(expired(ctx)),
 		tracked(duplicate(ctx)),
 		tracked(amount_override(ctx)),
+		tracked(stale(ctx)),
 		tracked(readonly(ctx)),
 	);
-	vec![expired, duplicate, overridden, readonly]
+	vec![expired, duplicate, overridden, stale, readonly]
 }
 
 async fn expired(ctx: &Context) -> Outcome {
@@ -126,6 +139,44 @@ async fn settled_payments(ctx: &Context, payment_hash: &str) -> Result<usize, St
 		.filter(|tx| tx.get("payment_hash").and_then(Value::as_str) == Some(payment_hash))
 		.filter(|tx| state(tx) == "settled")
 		.count())
+}
+
+async fn stale(ctx: &Context) -> Outcome {
+	if !ctx.supports("pay_invoice") {
+		return STALE.skip("pay_invoice not advertised");
+	}
+	let payments = match &ctx.payments {
+		Ok(payments) => payments,
+		Err(reason) => return STALE.skip(reason),
+	};
+	let invoice = match payments.node.create_invoice(payments.amount_msat, "nwc-check").await {
+		Ok(invoice) => invoice,
+		Err(error) => {
+			return STALE.skip(format!("counterparty couldn't create an invoice: {error:#}"));
+		}
+	};
+	// A wallet without an age limit pays this invoice.
+	if let Err(reason) = payments.reserve(1) {
+		return STALE.skip(reason);
+	}
+	let signed_at = Timestamp::from_secs(Timestamp::now().as_secs() - STALE_AGE_SECONDS);
+	let request = Request::new("pay_invoice", ctx.encryption())
+		.params(json!({ "invoice": invoice.bolt11 }))
+		.created_at(signed_at);
+	let reply = ctx.wallet.send(request).await;
+	if over_budget(&reply) {
+		return STALE.skip(OVER_BUDGET);
+	}
+	match payments.node.paid_msat(&invoice.payment_hash).await {
+		Ok(Some(_)) => STALE.fail("paid a request signed an hour ago"),
+		Ok(None) => match &reply {
+			Err(WalletError::NoReply) => STALE.pass("no reply, nothing paid"),
+			Err(WalletError::Rejected(_)) => STALE.skip("relays dropped the stale request"),
+			Ok(answer) if answer.error().is_some() => STALE.pass(describe(&reply)),
+			other => STALE.skip(format!("nothing arrived, but the wallet {}", describe(other))),
+		},
+		Err(error) => STALE.skip(format!("couldn't look up the invoice: {error:#}")),
+	}
 }
 
 async fn readonly(ctx: &Context) -> Outcome {

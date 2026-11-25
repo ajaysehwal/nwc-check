@@ -9,9 +9,9 @@ use nwc_check::wallet::Wallet;
 
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
-const PAYMENT_CHECKS: [&str; 12] = [
+const PAYMENT_CHECKS: [&str; 13] = [
 	"PAY-01", "PAY-02", "PAY-03", "CORE-04", "CORE-07", "CORE-08", "CORE-09", "SAFE-02", "SAFE-03",
-	"SAFE-05", "EXT13-04", "SAFE-04",
+	"SAFE-05", "EXT13-04", "SAFE-04", "SAFE-06",
 ];
 const INVOICE_CHECKS: [&str; 5] = ["CORE-01", "CORE-02", "CORE-03", "CORE-04", "CORE-05"];
 const NWC13_CHECKS: [&str; 3] = ["EXT13-01", "EXT13-02", "EXT13-03"];
@@ -183,6 +183,7 @@ async fn each_bug_is_caught_on_its_own() {
 		("CORE-09", Bugs { hidden_fee: true, ..none }),
 		("SAFE-05", Bugs { ignores_permissions: true, ..none }),
 		("SAFE-04", Bugs { pays_amount_param: true, ..none }),
+		("SAFE-06", Bugs { pays_stale: true, ..none }),
 		("EXT13-01", Bugs { budget_missing_from_get_info: true, ..none }),
 		("EXT13-02", Bugs { budget_without_total: true, ..none }),
 		("EXT13-03", Bugs { renews_at_missing: true, ..none }),

@@ -63,6 +63,7 @@ pub struct Request {
 	params: Value,
 	encryption: Encryption,
 	expiration: Option<Timestamp>,
+	created_at: Option<Timestamp>,
 	signer: Option<Keys>,
 }
 
@@ -73,6 +74,7 @@ impl Request {
 			params: json!({}),
 			encryption,
 			expiration: None,
+			created_at: None,
 			signer: None,
 		}
 	}
@@ -84,6 +86,12 @@ impl Request {
 
 	pub fn expiration(mut self, expiration: Timestamp) -> Self {
 		self.expiration = Some(expiration);
+		self
+	}
+
+	/// Sign the request as if it was made at this time, instead of now.
+	pub fn created_at(mut self, created_at: Timestamp) -> Self {
+		self.created_at = Some(created_at);
 		self
 	}
 
@@ -348,6 +356,9 @@ impl Wallet {
 		}
 		if let Some(expiration) = request.expiration {
 			builder = builder.tag(Tag::expiration(expiration));
+		}
+		if let Some(created_at) = request.created_at {
+			builder = builder.custom_created_at(created_at);
 		}
 		builder.finalize(signer).map_err(relay_error)
 	}
