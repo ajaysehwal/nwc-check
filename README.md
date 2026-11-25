@@ -158,7 +158,7 @@ Each check also has a severity: how much harm a problem can do to the user, whic
 | `MEDIUM` | Apps can break or misread the wallet |
 | `LOW` | A detail that rarely affects users |
 
-Problems are listed most severe first, the summary counts them by severity, and the JSON report has `severity` on each result and `summary.problems` per severity.
+Problems are listed most severe first, the summary counts them by severity, and every report format shows it: `severity` and `summary.problems` in JSON, a badge in HTML, and the failure `type` plus a `severity` property in JUnit.
 
 Each check also names the spec it comes from, pinned to the commit it was written against: NIP-47 [`c53877571f96`](https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md), NIP-40 [`f5a15ea27e06`](https://github.com/nostr-protocol/nips/blob/f5a15ea27e06/40.md) or NWC-13 [`36ab132bbce1`](https://github.com/nostr-wallet-connect/nwc/blob/36ab132bbce1/13.md). SAFE-02, SAFE-03, SAFE-04 and SAFE-06 have none. The spec appears in `nwc-check list`, in the JSON `spec` field, and under each problem in the text output.
 
