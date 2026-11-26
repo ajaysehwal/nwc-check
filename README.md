@@ -190,6 +190,7 @@ The JSON report also records evidence for each check: every request it sent, as 
 | SAFE-04 | CRITICAL | SAFETY | amount can't change a fixed-amount invoice |
 | SAFE-05 | CRITICAL | SAFETY | A read-only connection can't pay |
 | SAFE-06 | HIGH | SAFETY | A stale pay_invoice is not paid |
+| SAFE-07 | CRITICAL | SAFETY | create_connection can't grant more than its creator has |
 | EXT13-01 | LOW | MUST | get_budget is listed in the info event and get_info |
 | EXT13-02 | MEDIUM | MUST | get_budget is empty or has every required field |
 | EXT13-03 | LOW | MUST | A renewing budget has renews_at, a never budget doesn't |
@@ -215,6 +216,8 @@ CORE-09 and EXT13-04 share one payment: CORE-09 compares `get_balance`, and EXT1
 SAFE-04 pays a fixed-amount invoice with `amount` set to twice the invoice amount. It fails if the counterparty receives anything other than the invoice amount, and passes if the wallet rejects the request or ignores the param.
 
 SAFE-06 sends a `pay_invoice` request signed an hour ago, with no `expiration` tag, for a counterparty invoice. It fails if the counterparty receives the payment: a relay, or anyone holding a captured request, can send it again, and a wallet with no age limit pays it again. NIP-47 only defines the `expiration` tag, so this is a safety rule no spec requires, like SAFE-03. It passes when the wallet ignores or rejects the request, and it's skipped when the relays drop the old event themselves.
+
+SAFE-07 runs only when the wallet advertises `create_connection`. It asks for a connection with 1 sat more budget than the current connection has left, and for one with a method the current connection lacks; both must be refused. Each request uses a client key that nwc-check throws away, so even a connection the wallet wrongly creates can't be used. If one is created, the result gives its wallet pubkey so you can delete it.
 
 SAFE-05 needs a second connection to the same wallet that doesn't have `pay_invoice` permission. Pass it with `--readonly-uri` or `NWC_READONLY_URI`; like the main connection string, it's never read from the settings file. The read-only connection tries to pay a counterparty invoice, and the check passes only if the wallet replies `RESTRICTED` and nothing arrives.
 

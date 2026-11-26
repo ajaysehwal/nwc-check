@@ -1,7 +1,7 @@
 use futures::future::join_all;
-use serde_json::{Value, json};
+use serde_json::json;
 
-use super::{Context, Payments, describe, tracked};
+use super::{Context, describe, tracked};
 use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::wallet::Request;
 
@@ -30,7 +30,7 @@ async fn race(ctx: &Context) -> Outcome {
 		Ok(payments) => payments,
 		Err(reason) => return RACE.skip(reason),
 	};
-	let budget = match remaining_budget(ctx, payments).await {
+	let budget = match ctx.remaining_budget().await {
 		Ok(Some(0)) => return RACE.skip("the budget is used up"),
 		Ok(Some(budget)) => budget,
 		Ok(None) => return RACE.skip("no budget known (see --budget-sats)"),
@@ -96,19 +96,4 @@ async fn race(ctx: &Context) -> Outcome {
 	} else {
 		RACE.pass(format!("{summary}, {} refused", refused.count()))
 	}
-}
-
-async fn remaining_budget(ctx: &Context, payments: &Payments) -> Result<Option<u64>, String> {
-	if ctx.supports("get_budget") {
-		let reply = ctx.wallet.send(Request::new("get_budget", ctx.encryption())).await;
-		let result = match &reply {
-			Ok(reply) if reply.error().is_none() => reply.result().cloned().unwrap_or_default(),
-			_ => return Err(describe(&reply)),
-		};
-		let field = |name| result.get(name).and_then(Value::as_u64);
-		if let Some(total) = field("total_budget") {
-			return Ok(Some(total.saturating_sub(field("used_budget").unwrap_or(0))));
-		}
-	}
-	Ok(payments.wallet_budget_msat)
 }
