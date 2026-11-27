@@ -23,12 +23,15 @@ use serde_json::{Value, json};
 
 const FEE_MSAT: u64 = 1000;
 
-const METHODS: [&str; 8] = [
+const METHODS: [&str; 11] = [
 	"get_info",
 	"get_balance",
 	"make_invoice",
 	"lookup_invoice",
 	"pay_invoice",
+	"pay_keysend",
+	"multi_pay_invoice",
+	"multi_pay_keysend",
 	"list_transactions",
 	"get_budget",
 	"create_connection",
@@ -58,6 +61,7 @@ pub struct Bugs {
 	pub budget_ignores_fees: bool,
 	pub pays_amount_param: bool,
 	pub grants_any_connection: bool,
+	pub budget_only_on_pay_invoice: bool,
 	pub pays_stale: bool,
 }
 
@@ -86,6 +90,7 @@ impl Bugs {
 			budget_ignores_fees: true,
 			pays_amount_param: true,
 			grants_any_connection: true,
+			budget_only_on_pay_invoice: true,
 			pays_stale: true,
 			..Self::default()
 		}
@@ -181,6 +186,12 @@ impl MockNetwork {
 		}
 		invoice.paid = true;
 		Ok(invoice.preimage)
+	}
+
+	/// Records a keysend as an invoice that was paid on arrival, as LND does.
+	fn keysend(&self, preimage: [u8; 32], amount_msat: u64) {
+		let invoice = MockInvoice { bolt11: String::new(), preimage, amount_msat, paid: true };
+		self.invoices.lock().unwrap().insert(to_hex(&sha256(&preimage)), invoice);
 	}
 
 	fn find(&self, payment_hash: Option<&str>, bolt11: Option<&str>) -> Option<MockInvoice> {
@@ -381,7 +392,19 @@ impl MockWallet {
 			"get_balance" => Ok(json!({ "balance": *self.balance_msat.lock().unwrap() })),
 			"make_invoice" => Ok(self.make_invoice(&body["params"])),
 			"lookup_invoice" => self.lookup_invoice(&body["params"]),
-			"pay_invoice" => self.pay(&body["params"]).await,
+			"pay_invoice" => self.pay(&body["params"], true).await,
+			"pay_keysend" => {
+				self.keysend(&body["params"], !self.bugs.budget_only_on_pay_invoice).await
+			}
+			// One reply for the first item is enough for the checks that use batches.
+			"multi_pay_invoice" => {
+				let first = &body["params"]["invoices"][0];
+				self.pay(first, !self.bugs.budget_only_on_pay_invoice).await
+			}
+			"multi_pay_keysend" => {
+				let first = &body["params"]["keysends"][0];
+				self.keysend(first, !self.bugs.budget_only_on_pay_invoice).await
+			}
 			"get_budget" => Ok(self.get_budget()),
 			"create_connection" => self.create_connection(&body["params"]),
 			"list_transactions" => Ok(self.list_transactions()),
@@ -537,7 +560,24 @@ impl MockWallet {
 		Ok(())
 	}
 
-	async fn pay(&self, params: &Value) -> Result<Value, Value> {
+	async fn keysend(&self, params: &Value, charge: bool) -> Result<Value, Value> {
+		let failed = || error_value("PAYMENT_FAILED");
+		let amount_msat = params["amount"].as_u64().ok_or_else(failed)?;
+		let preimage = params["preimage"]
+			.as_str()
+			.and_then(from_hex)
+			.and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+			.unwrap_or_else(random_bytes);
+		if charge {
+			self.charge(amount_msat + FEE_MSAT).await?;
+		}
+		self.network.keysend(preimage, amount_msat);
+		let mut balance = self.balance_msat.lock().unwrap();
+		*balance = balance.saturating_sub(amount_msat + FEE_MSAT);
+		Ok(json!({ "preimage": to_hex(&preimage), "fees_paid": FEE_MSAT }))
+	}
+
+	async fn pay(&self, params: &Value, charge: bool) -> Result<Value, Value> {
 		let failed = || error_value("PAYMENT_FAILED");
 		let bolt11 = params["invoice"].as_str().unwrap_or_default();
 		let param = params["amount"].as_u64();
@@ -549,7 +589,9 @@ impl MockWallet {
 			(fixed, _) => fixed,
 		};
 		let fee = if self.bugs.budget_ignores_fees { 0 } else { FEE_MSAT };
-		self.charge(amount_msat + fee).await?;
+		if charge {
+			self.charge(amount_msat + fee).await?;
+		}
 		let preimage = self
 			.network
 			.pay(bolt11, self.bugs.pays_duplicates, Some(amount_msat))
