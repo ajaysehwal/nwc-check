@@ -70,7 +70,8 @@ pub struct RunArgs {
 	pub counterparty: CounterpartyArgs,
 }
 
-/// A node you control that pays and gets paid by the wallet. Payment checks are skipped without one.
+/// A counterparty that the wallet pays and that pays the wallet: an LND node, or a Lightning
+/// address that can only be paid. Payment checks are skipped without one.
 #[derive(clap::Args)]
 #[command(next_help_heading = "Payment checks")]
 pub struct CounterpartyArgs {
@@ -85,6 +86,10 @@ pub struct CounterpartyArgs {
 	/// LND TLS certificate, for nodes with a self-signed cert
 	#[arg(long, value_name = "PATH")]
 	pub lnd_cert: Option<PathBuf>,
+
+	/// Lightning address to pay instead of an LND node. It can't pay the wallet, so receive checks skip
+	#[arg(long, value_name = "NAME@DOMAIN", conflicts_with = "lnd_url")]
+	pub counterparty_address: Option<String>,
 
 	/// Allow checks that move funds. They never run on mainnet
 	#[arg(long)]

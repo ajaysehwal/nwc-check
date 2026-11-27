@@ -14,7 +14,7 @@ src/
 ├── check.rs       Check, Level, Severity, Spec, Status, Outcome and Summary types
 ├── evidence.rs    Records the requests each check sends
 ├── report/        JSON, HTML and JUnit reports
-├── counterparty/  Node that pays and gets paid by the wallet (Counterparty trait, LND client)
+├── counterparty/  Pays and gets paid by the wallet (Counterparty trait, LND, Lightning address)
 └── checks/
     ├── mod.rs     Context shared by all checks, sections and the runner
     ├── discovery.rs
@@ -28,7 +28,7 @@ src/
     ├── ledger.rs      Runs on its own after the others, since it compares balances
     └── budget.rs      Runs last, since it uses up the connection's budget
 tests/
-├── support/       Mock wallet service and counterparty on a local relay
+├── support/       Mock wallet service, counterparty and Lightning address server
 └── mock_wallet.rs Runs every check against a correct and a buggy mock wallet
 examples/
 └── mock_wallet.rs Runs the mock wallet so the CLI can be tried locally

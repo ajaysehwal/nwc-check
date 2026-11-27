@@ -17,7 +17,14 @@ pub struct Config {
 	pub only: Option<Vec<String>>,
 	pub strict: Option<bool>,
 	pub lnd: LndConfig,
+	pub lightning_address: AddressConfig,
 	pub spending: SpendingConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AddressConfig {
+	pub address: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -72,11 +79,17 @@ pub struct Settings {
 	pub network: Option<Network>,
 	pub only: Vec<String>,
 	pub strict: bool,
-	pub lnd: Option<LndSettings>,
+	pub counterparty: Option<CounterpartySettings>,
 	pub allow_spend: bool,
 	pub amount_sats: u64,
 	pub max_sats: u64,
 	pub budget_sats: Option<u64>,
+}
+
+#[derive(Debug)]
+pub enum CounterpartySettings {
+	Lnd(LndSettings),
+	Address(String),
 }
 
 #[derive(Debug)]
@@ -99,6 +112,15 @@ impl Settings {
 				cert: cli.lnd_cert.clone().or(config.lnd.cert),
 			}),
 		};
+		let address = cli.counterparty_address.clone().or(config.lightning_address.address);
+		let counterparty = match (lnd, address) {
+			(Some(_), Some(_)) => {
+				bail!("set either an LND node or a Lightning address as the counterparty, not both")
+			}
+			(Some(lnd), None) => Some(CounterpartySettings::Lnd(lnd)),
+			(None, Some(address)) => Some(CounterpartySettings::Address(address)),
+			(None, None) => None,
+		};
 		let only =
 			if args.only.is_empty() { config.only.unwrap_or_default() } else { args.only.clone() };
 		let settings = Self {
@@ -106,7 +128,7 @@ impl Settings {
 			network: args.network.or(config.network),
 			only,
 			strict: args.strict || config.strict.unwrap_or(false),
-			lnd,
+			counterparty,
 			allow_spend: cli.allow_spend || config.spending.allow.unwrap_or(false),
 			amount_sats: cli.amount.or(config.spending.amount).unwrap_or(10),
 			max_sats: cli.max_sats.or(config.spending.max_sats).unwrap_or(100),
@@ -157,6 +179,11 @@ strict = false
 # or start with ~/.
 [lnd]
 {lnd}
+
+# Or a Lightning address to pay instead of a node. It can't pay the wallet,
+# so checks that need the wallet to receive are skipped.
+[lightning_address]
+# address = "name@example.com"
 
 [spending]
 # Allow checks that move funds. They never run on mainnet.
@@ -216,7 +243,7 @@ mod tests {
 		assert!(settings.allow_spend);
 		assert_eq!(settings.amount_sats, 5);
 		assert_eq!(settings.max_sats, 100);
-		let lnd = settings.lnd.unwrap();
+		let Some(CounterpartySettings::Lnd(lnd)) = settings.counterparty else { panic!() };
 		assert_eq!(lnd.url, "https://cli");
 		assert_eq!(lnd.macaroon, PathBuf::from("/conf/m"));
 	}
@@ -226,6 +253,27 @@ mod tests {
 		assert!(
 			Settings::resolve(&args(&["--lnd-url", "https://cli"]), Config::default()).is_err()
 		);
+	}
+
+	#[test]
+	fn lightning_address_comes_from_either_place() {
+		let config = Config::parse("[lightning_address]\naddress = \"a@file\"", Path::new(""));
+		let settings = Settings::resolve(&args(&[]), config.unwrap()).unwrap();
+		assert!(
+			matches!(settings.counterparty, Some(CounterpartySettings::Address(a)) if a == "a@file")
+		);
+		let settings =
+			Settings::resolve(&args(&["--counterparty-address", "a@cli"]), Config::default());
+		assert!(
+			matches!(settings.unwrap().counterparty, Some(CounterpartySettings::Address(a)) if a == "a@cli")
+		);
+	}
+
+	#[test]
+	fn lnd_and_lightning_address_together_is_an_error() {
+		let config = Config::parse("[lightning_address]\naddress = \"a@file\"", Path::new(""));
+		let lnd = ["--lnd-url", "https://cli", "--lnd-macaroon", "m"];
+		assert!(Settings::resolve(&args(&lnd), config.unwrap()).is_err());
 	}
 
 	#[test]

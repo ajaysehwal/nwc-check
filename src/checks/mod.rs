@@ -21,7 +21,7 @@ use crate::evidence::{Evidence, Exchange, track};
 use crate::wallet::{Encryption, Reply, Request, Scheme, Wallet, WalletError};
 
 pub const UNKNOWN_METHOD: &str = "nwc_check_unknown_method";
-pub const NO_COUNTERPARTY: &str = "no counterparty node (see --lnd-url)";
+pub const NO_COUNTERPARTY: &str = "no counterparty (see --lnd-url or --counterparty-address)";
 
 pub struct Payments {
 	pub node: Box<dyn Counterparty>,
