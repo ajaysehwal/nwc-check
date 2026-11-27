@@ -13,7 +13,8 @@ use crate::wallet::Request;
 
 const AMOUNT_MSAT: u64 = 21_000;
 const DESCRIPTION: &str = "nwc-check";
-const EXPIRY_SECS: u64 = 3600;
+// Not a common default such as an hour, so a wallet that ignores expiry is caught.
+const EXPIRY_SECS: u64 = 5000;
 
 const CREATE: Check = Check::new(
 	"CORE-01",
