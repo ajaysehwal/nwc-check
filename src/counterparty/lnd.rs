@@ -6,7 +6,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use reqwest::{Certificate, Client, Method, RequestBuilder};
+use reqwest::{Certificate, Client, Method, RequestBuilder, Response, StatusCode};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -65,13 +65,7 @@ impl Lnd {
 	}
 
 	async fn call<T: DeserializeOwned>(&self, request: RequestBuilder) -> Result<T> {
-		let response = request.send().await?;
-		let status = response.status();
-		let body = response.text().await?;
-		if !status.is_success() {
-			bail!("LND returned {status}: {}", error_message(body));
-		}
-		serde_json::from_str(&body).context("unexpected reply from LND")
+		parse(request.send().await?).await
 	}
 
 	async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -115,8 +109,13 @@ impl Counterparty for Lnd {
 
 	fn paid_msat<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<Option<u64>>> {
 		async move {
-			let invoice: LookupInvoice =
-				self.get(&format!("/v1/invoice/{}", to_hex(payment_hash))).await?;
+			let path = format!("/v1/invoice/{}", to_hex(payment_hash));
+			// LND only records a keysend once it arrives, so an unknown hash means unpaid.
+			let response = self.request(Method::GET, &path).send().await?;
+			if response.status() == StatusCode::NOT_FOUND {
+				return Ok(None);
+			}
+			let invoice: LookupInvoice = parse(response).await?;
 			if invoice.state != "SETTLED" {
 				return Ok(None);
 			}
@@ -156,6 +155,15 @@ impl Counterparty for Lnd {
 		}
 		.boxed()
 	}
+}
+
+async fn parse<T: DeserializeOwned>(response: Response) -> Result<T> {
+	let status = response.status();
+	let body = response.text().await?;
+	if !status.is_success() {
+		bail!("LND returned {status}: {}", error_message(body));
+	}
+	serde_json::from_str(&body).context("unexpected reply from LND")
 }
 
 fn error_message(body: String) -> String {
