@@ -175,6 +175,7 @@ async fn each_bug_is_caught_on_its_own() {
 	let none = Bugs::default();
 	let cases = [
 		("CORE-01", Bugs { wrong_amount: true, ..none }),
+		("CORE-01", Bugs { ignores_expiry: true, ..none }),
 		("CORE-02", Bugs { ignore_description_hash: true, ..none }),
 		("CORE-03", Bugs { lookup_by_hash_only: true, ..none }),
 		("CORE-04", Bugs { never_settles: true, ..none }),

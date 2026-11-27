@@ -63,6 +63,7 @@ pub struct Bugs {
 	pub grants_any_connection: bool,
 	pub budget_only_on_pay_invoice: bool,
 	pub pays_stale: bool,
+	pub ignores_expiry: bool,
 }
 
 impl Bugs {
@@ -92,6 +93,7 @@ impl Bugs {
 			grants_any_connection: true,
 			budget_only_on_pay_invoice: true,
 			pays_stale: true,
+			ignores_expiry: true,
 			..Self::default()
 		}
 	}
@@ -459,7 +461,8 @@ impl MockWallet {
 			Some(hash) if !self.bugs.ignore_description_hash => Memo::Hash(hash),
 			_ => Memo::Text(description),
 		};
-		let expiry = Duration::from_secs(params["expiry"].as_u64().unwrap_or(3600));
+		let asked = params["expiry"].as_u64().filter(|_| !self.bugs.ignores_expiry);
+		let expiry = Duration::from_secs(asked.unwrap_or(3600));
 		let invoice = self.network.create(amount_msat, memo, expiry);
 		json!({
 			"type": "incoming",

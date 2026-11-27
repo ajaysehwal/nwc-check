@@ -103,7 +103,7 @@ The JSON report records evidence for each check: every request it sent, as `meth
 | CORE-04 | HIGH | MUST | lookup_invoice shows pending, then settled |
 | CORE-05 | LOW | MUST | Unknown invoice returns NOT_FOUND |
 
-These checks decode the returned BOLT11 invoice rather than trusting the reply's fields. They create unpaid invoices in the wallet; only CORE-04 needs a counterparty, to pay one.
+These checks decode the returned BOLT11 invoice rather than trusting the reply's fields. CORE-01 asks for a 5000-second expiry, not a round default like an hour, so a wallet that ignores `expiry` and uses its own default still fails. They create unpaid invoices in the wallet; only CORE-04 needs a counterparty, to pay one.
 
 ## Payments
 
