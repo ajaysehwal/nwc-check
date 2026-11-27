@@ -191,6 +191,7 @@ The JSON report also records evidence for each check: every request it sent, as 
 | SAFE-05 | CRITICAL | SAFETY | A read-only connection can't pay |
 | SAFE-06 | HIGH | SAFETY | A stale pay_invoice is not paid |
 | SAFE-07 | CRITICAL | SAFETY | create_connection can't grant more than its creator has |
+| SAFE-08 | CRITICAL | SAFETY | Every spending method respects the budget |
 | EXT13-01 | LOW | MUST | get_budget is listed in the info event and get_info |
 | EXT13-02 | MEDIUM | MUST | get_budget is empty or has every required field |
 | EXT13-03 | LOW | MUST | A renewing budget has renews_at, a never budget doesn't |
@@ -216,6 +217,8 @@ CORE-09 and EXT13-04 share one payment: CORE-09 compares `get_balance`, and EXT1
 SAFE-04 pays a fixed-amount invoice with `amount` set to twice the invoice amount. It fails if the counterparty receives anything other than the invoice amount, and passes if the wallet rejects the request or ignores the param.
 
 SAFE-06 sends a `pay_invoice` request signed an hour ago, with no `expiration` tag, for a counterparty invoice. It fails if the counterparty receives the payment: a relay, or anyone holding a captured request, can send it again, and a wallet with no age limit pays it again. NIP-47 only defines the `expiration` tag, so this is a safety rule no spec requires, like SAFE-03. It passes when the wallet ignores or rejects the request, and it's skipped when the relays drop the old event themselves.
+
+SAFE-08 runs after SAFE-02 in the Budget section. With each advertised spending method (`pay_invoice`, `pay_keysend`, `multi_pay_invoice` and `multi_pay_keysend`), it tries to pay the counterparty 1 sat more than the budget has left. Each must be refused with `QUOTA_EXCEEDED`; the check fails if the counterparty receives anything. Other errors, such as `INSUFFICIENT_BALANCE`, don't show whether the budget was checked, so they make the check skip rather than pass. Keysend payments need the LND counterparty to run with `--accept-keysend`.
 
 SAFE-07 runs only when the wallet advertises `create_connection`. It asks for a connection with 1 sat more budget than the current connection has left, and for one with a method the current connection lacks; both must be refused. Each request uses a client key that nwc-check throws away, so even a connection the wallet wrongly creates can't be used. If one is created, the result gives its wallet pubkey so you can delete it.
 
