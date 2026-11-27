@@ -4,6 +4,8 @@ Conformance and safety checks for [Nostr Wallet Connect](https://github.com/nost
 
 `nwc-check` connects to a wallet service the way an app would, sends it real NIP-47 requests, including malformed and adversarial ones, and reports whether it follows the spec and handles requests safely.
 
+It has already found bugs in ZEUS, Primal, Alby Hub and the Alby JS SDK. See [docs/findings.md](docs/findings.md).
+
 By default no check moves funds. Some create unpaid invoices in the wallet. Payment checks only run with a counterparty node and `--allow-spend`, and never on mainnet.
 
 ## Install
