@@ -5,8 +5,10 @@ use std::time::Duration;
 use nostr_sdk::prelude::MockRelay;
 use nwc_check::check::{Outcome, Status};
 use nwc_check::checks::{self, Context, Payments};
+use nwc_check::counterparty::{Counterparty, LightningAddress};
 use nwc_check::wallet::Wallet;
 
+use crate::support::lnurl::serve_address;
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
 const PAYMENT_CHECKS: [&str; 14] = [
@@ -24,6 +26,8 @@ struct Run {
 	broke_counterparty: bool,
 	max_sats: u64,
 	budget_sats: Option<u64>,
+	/// Pay a Lightning address instead, with or without LUD-21 verify.
+	address: Option<bool>,
 }
 
 impl Default for Run {
@@ -35,6 +39,7 @@ impl Default for Run {
 			broke_counterparty: false,
 			max_sats: 1000,
 			budget_sats: Some(100),
+			address: None,
 		}
 	}
 }
@@ -51,7 +56,14 @@ impl Run {
 			.await
 			.unwrap()
 			.with_readonly(readonly);
-		if self.counterparty {
+		if let Some(verify) = self.address {
+			let address = serve_address(network.clone(), verify).await;
+			let node = LightningAddress::new(&address, Duration::from_secs(3)).unwrap();
+			let info = node.info().await.unwrap();
+			let payments =
+				Payments::new(Box::new(node), info.network, 10_000, self.max_sats * 1000);
+			ctx = ctx.with_payments(payments.with_wallet_budget(budget_msat));
+		} else if self.counterparty {
 			let node = Box::new(MockCounterparty {
 				network: network.clone(),
 				broke: self.broke_counterparty,
@@ -209,4 +221,39 @@ async fn each_bug_is_caught_on_its_own() {
 			outcomes.iter().filter(|o| o.is_problem()).collect::<Vec<_>>()
 		);
 	}
+}
+
+const RECEIVE_CHECKS: [&str; 3] = ["PAY-01", "CORE-04", "CORE-08"];
+
+#[tokio::test]
+async fn lightning_address_runs_the_send_side() {
+	let (outcomes, network) = Run { address: Some(true), ..Run::default() }.checks().await;
+	let problems: Vec<&Outcome> = outcomes.iter().filter(|outcome| outcome.is_problem()).collect();
+	assert!(problems.is_empty(), "{problems:#?}");
+	for id in ["PAY-02", "PAY-03", "CORE-07", "CORE-09", "SAFE-02", "SAFE-03", "SAFE-05", "SAFE-08"]
+	{
+		assert_eq!(status(&outcomes, id), Status::Pass, "{id}");
+	}
+	for id in RECEIVE_CHECKS.iter().chain(&["SAFE-04"]) {
+		assert_eq!(status(&outcomes, id), Status::Skip, "{id}");
+	}
+	assert!(network.moved_msat() > 0);
+}
+
+#[tokio::test]
+async fn lightning_address_catches_a_bad_preimage() {
+	let bugs = Bugs { wrong_preimage: true, ..Bugs::default() };
+	let (outcomes, _) = Run { bugs, address: Some(true), ..Run::default() }.checks().await;
+	assert_eq!(status(&outcomes, "PAY-03"), Status::Fail);
+}
+
+#[tokio::test]
+async fn lightning_address_without_verify_relies_on_the_preimage() {
+	let (outcomes, _) = Run { address: Some(false), ..Run::default() }.checks().await;
+	let problems: Vec<&Outcome> = outcomes.iter().filter(|outcome| outcome.is_problem()).collect();
+	assert!(problems.is_empty(), "{problems:#?}");
+	let sent = outcomes.iter().find(|outcome| outcome.id == "PAY-02").unwrap();
+	assert_eq!(sent.status, Status::Skip);
+	assert!(sent.detail.contains("LUD-21"), "{}", sent.detail);
+	assert_eq!(status(&outcomes, "PAY-03"), Status::Pass);
 }

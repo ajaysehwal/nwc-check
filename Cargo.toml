@@ -26,4 +26,4 @@ toml = "0.8"
 [dev-dependencies]
 bitcoin = "0.32"
 nostr-sdk = { version = "0.45", features = ["local-relay"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }

@@ -250,6 +250,9 @@ async fn amount_override(ctx: &Context) -> Outcome {
 		Ok(payments) => payments,
 		Err(reason) => return OVERRIDE.skip(reason),
 	};
+	if !payments.node.sees_amount_received() {
+		return OVERRIDE.skip("the counterparty can't tell how much an invoice received");
+	}
 	let invoice = match payments.node.create_invoice(payments.amount_msat, "nwc-check").await {
 		Ok(invoice) => invoice,
 		Err(error) => {

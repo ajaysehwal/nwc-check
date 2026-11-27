@@ -122,14 +122,21 @@ enum Probe {
 }
 
 async fn every_method(ctx: &Context) -> Outcome {
-	let methods: Vec<&str> = SPENDING.into_iter().filter(|method| ctx.supports(method)).collect();
-	if methods.is_empty() {
+	let advertised: Vec<&str> =
+		SPENDING.into_iter().filter(|method| ctx.supports(method)).collect();
+	if advertised.is_empty() {
 		return EVERY_METHOD.skip("no spending method advertised");
 	}
 	let payments = match &ctx.payments {
 		Ok(payments) => payments,
 		Err(reason) => return EVERY_METHOD.skip(reason),
 	};
+	let (methods, untested): (Vec<&str>, Vec<&str>) = advertised
+		.into_iter()
+		.partition(|method| method.ends_with("invoice") || payments.node.receives_keysend());
+	if methods.is_empty() {
+		return EVERY_METHOD.skip("the counterparty can't receive keysend");
+	}
 	let remaining = match ctx.remaining_budget().await {
 		Ok(Some(remaining)) => remaining,
 		Ok(None) => return EVERY_METHOD.skip("no budget known (see --budget-sats)"),
@@ -158,7 +165,14 @@ async fn every_method(ctx: &Context) -> Outcome {
 		}
 	}
 	if unclear.is_empty() {
-		EVERY_METHOD.pass(format!("{} refused with QUOTA_EXCEEDED", refused.join(", ")))
+		let mut detail = format!("{} refused with QUOTA_EXCEEDED", refused.join(", "));
+		if !untested.is_empty() {
+			detail += &format!(
+				"; {} not tried, the counterparty can't receive keysend",
+				untested.join(", ")
+			);
+		}
+		EVERY_METHOD.pass(detail)
 	} else {
 		EVERY_METHOD
 			.skip(format!("couldn't tell whether the budget applies: {}", unclear.join("; ")))
