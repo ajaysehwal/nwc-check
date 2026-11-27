@@ -1,10 +1,10 @@
-use nostr_sdk::prelude::{Keys, Timestamp};
+use nostr_sdk::prelude::Timestamp;
 use serde_json::{Value, json};
 
 use super::{Context, OVER_BUDGET, describe, over_budget, state, tracked};
 use crate::check::{Check, Level, Outcome, Severity, Spec};
 use crate::counterparty::to_hex;
-use crate::wallet::{Reply, Request, WalletError};
+use crate::wallet::{Request, WalletError};
 
 const EXPIRED: Check = Check::new(
 	"SAFE-01",
@@ -54,41 +54,17 @@ const OVERRIDE: Check = Check::new(
 	"A wallet that pays the amount param instead of the invoice amount can be made to overpay.",
 );
 
-const ESCALATION: Check = Check::new(
-	"SAFE-07",
-	Level::Safety,
-	Severity::Critical,
-	Spec::Safety,
-	"create_connection can't grant more than its creator has",
-	"A connection that can mint a bigger budget or more methods than its own turns any leak into an unlimited spending key.",
-);
-
-pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE, &OVERRIDE, &STALE, &READONLY, &ESCALATION];
-
-/// Methods a new connection could be granted, in the order SAFE-07 looks for one the creator lacks.
-const GRANTABLE: [&str; 10] = [
-	"pay_invoice",
-	"pay_keysend",
-	"multi_pay_invoice",
-	"multi_pay_keysend",
-	"make_invoice",
-	"lookup_invoice",
-	"list_transactions",
-	"get_balance",
-	"get_budget",
-	"sign_message",
-];
+pub const CHECKS: &[&Check] = &[&EXPIRED, &DUPLICATE, &OVERRIDE, &STALE, &READONLY];
 
 pub async fn run(ctx: &Context) -> Vec<Outcome> {
-	let (expired, duplicate, overridden, stale, readonly, escalation) = tokio::join!(
+	let (expired, duplicate, overridden, stale, readonly) = tokio::join!(
 		tracked(expired(ctx)),
 		tracked(duplicate(ctx)),
 		tracked(amount_override(ctx)),
 		tracked(stale(ctx)),
 		tracked(readonly(ctx)),
-		tracked(escalation(ctx)),
 	);
-	vec![expired, duplicate, overridden, stale, readonly, escalation]
+	vec![expired, duplicate, overridden, stale, readonly]
 }
 
 async fn expired(ctx: &Context) -> Outcome {
@@ -278,61 +254,4 @@ async fn amount_override(ctx: &Context) -> Outcome {
 		Ok(None) => OVERRIDE.skip(format!("nothing arrived, but the wallet {}", describe(&reply))),
 		Err(error) => OVERRIDE.skip(format!("couldn't look up the invoice: {error:#}")),
 	}
-}
-
-async fn escalation(ctx: &Context) -> Outcome {
-	if !ctx.supports("create_connection") {
-		return ESCALATION.skip("create_connection not advertised");
-	}
-	let budget = match ctx.remaining_budget().await {
-		Ok(budget) => budget.filter(|_| ctx.supports("pay_invoice")),
-		Err(error) => return ESCALATION.skip(format!("get_budget: {error}")),
-	};
-	let missing = GRANTABLE.into_iter().find(|method| !ctx.supports(method));
-
-	let mut asked = Vec::new();
-	if let Some(remaining) = budget {
-		// A whole sat over, so a wallet that rounds to sats can't hide the difference.
-		let max_amount = remaining + 1000;
-		let params = json!({ "request_methods": ["pay_invoice"], "max_amount": max_amount });
-		let what =
-			format!("a {} sat budget with {} sats left", max_amount / 1000, remaining / 1000);
-		asked.push((what, create_connection(ctx, params).await));
-	}
-	if let Some(method) = missing {
-		let params = json!({ "request_methods": ["get_info", method], "max_amount": 1000 });
-		asked.push((format!("{method}, which it lacks"), create_connection(ctx, params).await));
-	}
-	if asked.is_empty() {
-		return ESCALATION
-			.skip("the connection has no budget and every method, so it can't be exceeded");
-	}
-
-	let mut refused = Vec::new();
-	for (what, reply) in &asked {
-		match reply {
-			Ok(reply) if reply.error().is_some() => refused.push(what.as_str()),
-			Ok(reply) => {
-				let wallet = reply
-					.result()
-					.and_then(|result| result.get("wallet_pubkey"))
-					.and_then(Value::as_str)
-					.unwrap_or("unknown");
-				return ESCALATION.fail(format!(
-					"granted {what}; delete the connection with wallet pubkey {wallet}"
-				));
-			}
-			Err(error) => return ESCALATION.skip(format!("asking for {what}: {error}")),
-		}
-	}
-	ESCALATION.pass(format!("refused {}", refused.join(" and ")))
-}
-
-/// Asks for a new connection for a client key that is thrown away, so even a connection
-/// the wallet wrongly creates can't be used.
-async fn create_connection(ctx: &Context, mut params: Value) -> Result<Reply, WalletError> {
-	params["pubkey"] = json!(Keys::generate().public_key().to_hex());
-	params["name"] = json!("nwc-check SAFE-07 probe, safe to delete");
-	params["budget_renewal"] = json!("never");
-	ctx.wallet.send(Request::new("create_connection", ctx.encryption()).params(params)).await
 }
