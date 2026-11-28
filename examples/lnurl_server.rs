@@ -4,6 +4,7 @@ mod lnurl;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use clap::Parser;
 use nwc_check::counterparty::{Counterparty, Lnd};
 
@@ -25,7 +26,7 @@ struct Args {
 	/// Name before the @
 	#[arg(long, default_value = "bob")]
 	name: String,
-	#[arg(long, default_value_t = 3000)]
+	#[arg(long, default_value_t = 3400)]
 	port: u16,
 	/// Leave out LUD-21 verify URLs, like services that don't support it
 	#[arg(long)]
@@ -42,8 +43,9 @@ async fn main() -> anyhow::Result<()> {
 		Duration::from_secs(30),
 	)?;
 	let info = node.info().await?;
-	let address =
-		AddressServer::start(Box::new(node), &args.name, args.port, !args.no_verify).await;
+	let address = AddressServer::start(Box::new(node), &args.name, args.port, !args.no_verify)
+		.await
+		.with_context(|| format!("can't listen on port {}; pick another with --port", args.port))?;
 	println!("{address}");
 	eprintln!(
 		"Serving {address} from LND on {}{}. Press Ctrl-C to stop.",

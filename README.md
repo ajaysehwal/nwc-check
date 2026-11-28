@@ -155,9 +155,9 @@ cargo run --example lnurl_server -- \
   --lnd-url https://127.0.0.1:8085 \
   --lnd-macaroon ~/.polar/networks/1/volumes/lnd/erin/data/chain/bitcoin/regtest/admin.macaroon \
   --lnd-cert ~/.polar/networks/1/volumes/lnd/erin/tls.cert
-# prints bob@127.0.0.1:3000
+# prints bob@127.0.0.1:3400
 
-nwc-check run --allow-spend --counterparty-address bob@127.0.0.1:3000 "nostr+walletconnect://..."
+nwc-check run --allow-spend --counterparty-address bob@127.0.0.1:3400 "nostr+walletconnect://..."
 ```
 
 Add `--no-verify` to serve the address without LUD-21 `verify` URLs, like services that don't support it.

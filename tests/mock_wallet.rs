@@ -58,7 +58,7 @@ impl Run {
 			.with_readonly(readonly);
 		if let Some(verify) = self.address {
 			let payee = Box::new(MockCounterparty { network: network.clone(), broke: false });
-			let address = AddressServer::start(payee, "alice", 0, verify).await;
+			let address = AddressServer::start(payee, "alice", 0, verify).await.unwrap();
 			let node = LightningAddress::new(&address, Duration::from_secs(3)).unwrap();
 			let info = node.info().await.unwrap();
 			let payments =

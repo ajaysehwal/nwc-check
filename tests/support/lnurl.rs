@@ -20,9 +20,14 @@ pub struct AddressServer {
 impl AddressServer {
 	/// Serves `name` on 127.0.0.1:`port` (0 picks a free port) and returns the address. Without
 	/// `verify` the server gives no LUD-21 verify URLs.
-	pub async fn start(node: Box<dyn Counterparty>, name: &str, port: u16, verify: bool) -> String {
-		let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
-		let host = listener.local_addr().unwrap().to_string();
+	pub async fn start(
+		node: Box<dyn Counterparty>,
+		name: &str,
+		port: u16,
+		verify: bool,
+	) -> std::io::Result<String> {
+		let listener = TcpListener::bind(("127.0.0.1", port)).await?;
+		let host = listener.local_addr()?.to_string();
 		let server = Arc::new(Self {
 			node,
 			name: name.to_owned(),
@@ -35,7 +40,7 @@ impl AddressServer {
 				tokio::spawn(server.clone().respond(stream));
 			}
 		});
-		format!("{name}@{host}")
+		Ok(format!("{name}@{host}"))
 	}
 
 	async fn respond(self: Arc<Self>, mut stream: TcpStream) {
