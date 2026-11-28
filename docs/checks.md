@@ -30,6 +30,7 @@ The JSON report records evidence for each check: every request it sent, as `meth
 - Checks for methods or encryption schemes the wallet doesn't advertise are skipped.
 - Checks that move funds are skipped without a counterparty and `--allow-spend`, and on mainnet: everything under Payments, Ledger and Budget, plus CORE-04 and SAFE-03 to SAFE-06.
 - Payment checks are skipped, not failed, when the wallet refuses with `QUOTA_EXCEEDED`, since that means the connection's budget ran out.
+- With a Lightning address as the counterparty, some checks can't run. See [below](#lightning-address-counterparty).
 - A reply without an `e` tag can't be matched to its request. It's reported as such, and RESP-04 warns, rather than looking like no reply.
 
 ## Discovery
@@ -146,3 +147,13 @@ These run last because they use up the connection's budget, so use a connection 
 **SAFE-02** reads the connection's remaining budget with `get_budget`, or from `--budget-sats` for wallets without it. It then sends five payments at once, sized so four fit the budget and five don't, and checks how much the counterparty actually received. The five payments together must fit under `--max-sats`.
 
 **SAFE-08** runs after SAFE-02. With each advertised spending method (`pay_invoice`, `pay_keysend`, `multi_pay_invoice` and `multi_pay_keysend`), it tries to pay the counterparty 1 sat more than the budget has left. Each must be refused with `QUOTA_EXCEEDED`; the check fails if the counterparty receives anything. Other errors, such as `INSUFFICIENT_BALANCE`, don't show whether the budget was checked, so they make the check skip rather than pass. Keysend payments need the LND counterparty to run with `--accept-keysend`.
+
+## Lightning address counterparty
+
+A Lightning address can be paid but can't pay, and its LUD-21 `verify` URL says whether an invoice was paid, not how much arrived. So with `--counterparty-address`:
+
+- PAY-01 and CORE-04 are skipped: they need the counterparty to pay the wallet.
+- CORE-08 is skipped: it needs an invoice without an amount, which LNURL-pay never gives.
+- SAFE-04 is skipped: it would pass on an overpayment it can't see.
+- SAFE-08 only tries `pay_invoice` and `multi_pay_invoice`, since a keysend to the service can't be looked up.
+- If the service has no `verify` URL, PAY-02 and the other checks that look for a payment are skipped. PAY-03 still checks the wallet's preimage against the invoice.

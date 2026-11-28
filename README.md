@@ -6,7 +6,7 @@ Conformance and safety checks for [Nostr Wallet Connect](https://github.com/nost
 
 It has already found bugs in ZEUS, Primal, Alby Hub and the Alby JS SDK. See [docs/findings.md](docs/findings.md).
 
-By default no check moves funds. Some create unpaid invoices in the wallet. Payment checks only run with a counterparty node and `--allow-spend`, and never on mainnet.
+By default no check moves funds. Some create unpaid invoices in the wallet. Payment checks only run with a counterparty and `--allow-spend`, and never on mainnet.
 
 ## Install
 
@@ -83,7 +83,7 @@ Paths can be relative to the file or start with `~/`. Unknown keys are rejected,
 
 ### Payment checks
 
-Payment checks need a second node you control, the counterparty. It pays an invoice from `make_invoice` and creates an invoice for the wallet to pay with `pay_invoice`. Only LND is supported for now.
+Payment checks need a counterparty. It pays an invoice from `make_invoice` and creates an invoice for the wallet to pay with `pay_invoice`. It can be an LND node you control, or a Lightning address.
 
 ```sh
 nwc-check run --allow-spend \
@@ -93,6 +93,14 @@ nwc-check run --allow-spend \
 ```
 
 The counterparty needs a route to the wallet, for example a channel on regtest or signet.
+
+#### Lightning address
+
+With `--counterparty-address name@domain` (or `address` under `[lightning_address]`), there's no node to run. nwc-check gets invoices from the address over LNURL-pay (LUD-06, LUD-16) and asks the service whether they were paid through LUD-21 `verify`. Every request goes to that domain, and the run prints which one.
+
+An address can only be paid, so PAY-01, CORE-04, CORE-08 and SAFE-04 are skipped, and SAFE-08 only tries the invoice methods. Without a `verify` URL, payments can't be confirmed, so the checks that look for one are skipped. [docs/checks.md](docs/checks.md#lightning-address-counterparty) has the details.
+
+The network comes from the address's invoices, so the usual guard applies: an address on mainnet turns payment checks off. Addresses on `localhost`, `127.0.0.1` or an onion host are fetched over plain HTTP. To try it on regtest, `cargo run --example lnurl_server` serves an address backed by an LND node; see [Try it without a wallet](#try-it-without-a-wallet).
 
 Spending is guarded:
 
@@ -105,6 +113,7 @@ Spending is guarded:
 | `--lnd-url <URL>` | LND REST URL |
 | `--lnd-macaroon <PATH>` | Macaroon with info:read, invoices:write and offchain:write, e.g. `admin.macaroon` |
 | `--lnd-cert <PATH>` | TLS certificate, for nodes with a self-signed cert |
+| `--counterparty-address <NAME@DOMAIN>` | Lightning address to pay instead of an LND node |
 | `--allow-spend` | Allow checks that move funds |
 | `--amount <SATS>` | Amount of each test payment (default 10) |
 | `--max-sats <SATS>` | Most sats a run may move in total (default 100) |
@@ -138,6 +147,20 @@ cargo run --example mock_wallet -- --buggy # a wallet with deliberate bugs
 ```
 
 Then pass the printed connection string to `nwc-check run` in another terminal.
+
+To try `--counterparty-address` on regtest, serve a Lightning address backed by one of your LND nodes. Invoices come from that node, so the wallet under test needs a route to it:
+
+```sh
+cargo run --example lnurl_server -- \
+  --lnd-url https://127.0.0.1:8085 \
+  --lnd-macaroon ~/.polar/networks/1/volumes/lnd/erin/data/chain/bitcoin/regtest/admin.macaroon \
+  --lnd-cert ~/.polar/networks/1/volumes/lnd/erin/tls.cert
+# prints bob@127.0.0.1:3400
+
+nwc-check run --allow-spend --counterparty-address bob@127.0.0.1:3400 "nostr+walletconnect://..."
+```
+
+Add `--no-verify` to serve the address without LUD-21 `verify` URLs, like services that don't support it.
 
 ### Exit codes
 

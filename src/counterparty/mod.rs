@@ -1,3 +1,4 @@
+mod address;
 mod lnd;
 
 use std::fmt;
@@ -6,6 +7,7 @@ use anyhow::Result;
 use bitcoin_hashes::sha256;
 use futures::future::BoxFuture;
 
+pub use address::LightningAddress;
 pub use lnd::Lnd;
 
 pub struct NodeInfo {
@@ -49,6 +51,16 @@ pub trait Counterparty: Send + Sync {
 	fn paid_msat<'a>(&'a self, payment_hash: &'a [u8; 32]) -> BoxFuture<'a, Result<Option<u64>>>;
 
 	fn pay<'a>(&'a self, bolt11: &'a str) -> BoxFuture<'a, Result<(), PayError>>;
+
+	/// Whether a keysend to `info().pubkey` shows up in `paid_msat`.
+	fn receives_keysend(&self) -> bool {
+		true
+	}
+
+	/// Whether `paid_msat` is the amount that arrived, rather than the invoice amount.
+	fn sees_amount_received(&self) -> bool {
+		true
+	}
 }
 
 pub fn sha256(data: &[u8]) -> [u8; 32] {

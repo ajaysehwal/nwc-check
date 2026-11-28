@@ -13,12 +13,12 @@ use clap::Parser;
 use nostr::nips::nip47::NostrWalletConnectUri;
 use nwc_check::check::{Outcome, Summary};
 use nwc_check::checks::{self, Context, Payments};
-use nwc_check::counterparty::{Counterparty, Lnd};
+use nwc_check::counterparty::{Counterparty, LightningAddress, Lnd};
 use nwc_check::report::Report;
 use nwc_check::wallet::{Wallet, WalletError};
 
 use crate::cli::{Cli, Command, Format, InitArgs, RunArgs};
-use crate::config::{Config, LndSettings, Settings};
+use crate::config::{Config, CounterpartySettings, Settings};
 use crate::ui::Ui;
 
 #[tokio::main]
@@ -88,10 +88,13 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	if let Some(readonly) = readonly {
 		ctx = ctx.with_readonly(readonly);
 	}
-	if let Some(lnd) = &settings.lnd {
+	if let Some(chosen) = &settings.counterparty {
+		let mut name = "LND".to_owned();
 		ctx = if settings.allow_spend {
-			ui.busy("Connecting to the counterparty node");
-			ctx.with_payments(counterparty(lnd, &settings).await?)
+			ui.busy("Connecting to the counterparty");
+			let (payments, described) = counterparty(chosen, &settings).await?;
+			name = described;
+			ctx.with_payments(payments)
 		} else {
 			ctx.block_payments("spending is off (see --allow-spend)")
 		};
@@ -99,7 +102,7 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 			Ok(payments) => ui.step(
 				true,
 				format!(
-					"Counterparty LND on {}, up to {} sats",
+					"Counterparty {name} on {}, up to {} sats",
 					payments.network, settings.max_sats
 				),
 			),
@@ -176,17 +179,32 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	Ok(exit_code(&summary, settings.strict))
 }
 
-async fn counterparty(lnd: &LndSettings, settings: &Settings) -> Result<Payments> {
-	let node = Lnd::new(&lnd.url, &lnd.macaroon, lnd.cert.as_deref(), Duration::from_secs(60))?;
-	node.check_access().await.context("the counterparty LND node can't be used")?;
-	let info = node.info().await.context("failed to query the counterparty LND node")?;
-	let payments = Payments::new(
-		Box::new(node),
-		info.network,
-		settings.amount_sats * 1000,
-		settings.max_sats * 1000,
-	);
-	Ok(payments.with_wallet_budget(settings.budget_sats.map(|sats| sats * 1000)))
+/// Connects to the counterparty and describes it for the terminal.
+async fn counterparty(
+	chosen: &CounterpartySettings,
+	settings: &Settings,
+) -> Result<(Payments, String)> {
+	let timeout = Duration::from_secs(60);
+	let (node, info, name): (Box<dyn Counterparty>, _, _) = match chosen {
+		CounterpartySettings::Lnd(lnd) => {
+			let node = Lnd::new(&lnd.url, &lnd.macaroon, lnd.cert.as_deref(), timeout)?;
+			node.check_access().await.context("the counterparty LND node can't be used")?;
+			let info = node.info().await.context("failed to query the counterparty LND node")?;
+			(Box::new(node), info, "LND".to_owned())
+		}
+		CounterpartySettings::Address(address) => {
+			let node = LightningAddress::new(address, timeout)?;
+			let info = node
+				.info()
+				.await
+				.with_context(|| format!("failed to get an invoice from {}", node.address()))?;
+			let name = format!("{} (requests go to {})", node.address(), node.domain());
+			(Box::new(node), info, name)
+		}
+	};
+	let payments =
+		Payments::new(node, info.network, settings.amount_sats * 1000, settings.max_sats * 1000);
+	Ok((payments.with_wallet_budget(settings.budget_sats.map(|sats| sats * 1000)), name))
 }
 
 fn init(args: InitArgs) -> Result<ExitCode> {
