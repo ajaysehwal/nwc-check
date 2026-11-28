@@ -31,7 +31,8 @@ tests/
 ├── support/       Mock wallet service, counterparty and Lightning address server
 └── mock_wallet.rs Runs every check against a correct and a buggy mock wallet
 examples/
-└── mock_wallet.rs Runs the mock wallet so the CLI can be tried locally
+├── mock_wallet.rs Runs the mock wallet so the CLI can be tried locally
+└── lnurl_server.rs Serves a Lightning address backed by an LND node, for regtest
 ```
 
 A run has three stages:

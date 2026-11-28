@@ -8,7 +8,7 @@ use nwc_check::checks::{self, Context, Payments};
 use nwc_check::counterparty::{Counterparty, LightningAddress};
 use nwc_check::wallet::Wallet;
 
-use crate::support::lnurl::serve_address;
+use crate::support::lnurl::AddressServer;
 use crate::support::{Bugs, MockCounterparty, MockNetwork, MockWallet};
 
 const PAYMENT_CHECKS: [&str; 14] = [
@@ -57,7 +57,8 @@ impl Run {
 			.unwrap()
 			.with_readonly(readonly);
 		if let Some(verify) = self.address {
-			let address = serve_address(network.clone(), verify).await;
+			let payee = Box::new(MockCounterparty { network: network.clone(), broke: false });
+			let address = AddressServer::start(payee, "alice", 0, verify).await;
 			let node = LightningAddress::new(&address, Duration::from_secs(3)).unwrap();
 			let info = node.info().await.unwrap();
 			let payments =

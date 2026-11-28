@@ -148,6 +148,20 @@ cargo run --example mock_wallet -- --buggy # a wallet with deliberate bugs
 
 Then pass the printed connection string to `nwc-check run` in another terminal.
 
+To try `--counterparty-address` on regtest, serve a Lightning address backed by one of your LND nodes. Invoices come from that node, so the wallet under test needs a route to it:
+
+```sh
+cargo run --example lnurl_server -- \
+  --lnd-url https://127.0.0.1:8085 \
+  --lnd-macaroon ~/.polar/networks/1/volumes/lnd/erin/data/chain/bitcoin/regtest/admin.macaroon \
+  --lnd-cert ~/.polar/networks/1/volumes/lnd/erin/tls.cert
+# prints bob@127.0.0.1:3000
+
+nwc-check run --allow-spend --counterparty-address bob@127.0.0.1:3000 "nostr+walletconnect://..."
+```
+
+Add `--no-verify` to serve the address without LUD-21 `verify` URLs, like services that don't support it.
+
 ### Exit codes
 
 | Code | Meaning |
