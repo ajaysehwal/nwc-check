@@ -4,7 +4,7 @@ Every check nwc-check runs, grouped by the section it's reported in. `nwc-check 
 
 - [How results are graded](#how-results-are-graded)
 - [When checks skip](#when-checks-skip)
-- [Discovery](#discovery) · [Encryption](#encryption) · [Responses](#responses) · [Errors](#errors) · [Safety](#safety) · [Invoices](#invoices) · [Payments](#payments) · [Connection budget (NWC-13)](#connection-budget-nwc-13) · [Ledger](#ledger) · [Budget](#budget)
+- [Discovery](#discovery) · [Encryption](#encryption) · [Responses](#responses) · [Errors](#errors) · [Safety](#safety) · [Invoices](#invoices) · [Payments](#payments) · [Connection budget (NWC-13)](#connection-budget-nwc-13) · [Ledger](#ledger) · [Budget](#budget) · [Rate limits](#rate-limits)
 
 ## How results are graded
 
@@ -21,7 +21,7 @@ Each check also has a severity: how much harm a problem can do to the user, whic
 
 Problems are listed most severe first, the summary counts them by severity, and every report format shows it: `severity` and `summary.problems` in JSON, a badge in HTML, and the failure `type` plus a `severity` property in JUnit.
 
-Each check names the spec it comes from, pinned to the commit it was written against: NIP-47 [`c53877571f96`](https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md), NIP-40 [`f5a15ea27e06`](https://github.com/nostr-protocol/nips/blob/f5a15ea27e06/40.md) or NWC-13 [`36ab132bbce1`](https://github.com/nostr-wallet-connect/nwc/blob/36ab132bbce1/13.md). SAFE-02, SAFE-03, SAFE-04 and SAFE-06 have none. The spec appears in `nwc-check list`, in the JSON `spec` field, and under each problem in the text output.
+Each check names the spec it comes from, pinned to the commit it was written against: NIP-47 [`c53877571f96`](https://github.com/nostr-protocol/nips/blob/c53877571f96/47.md), NIP-40 [`f5a15ea27e06`](https://github.com/nostr-protocol/nips/blob/f5a15ea27e06/40.md) or NWC-13 [`36ab132bbce1`](https://github.com/nostr-wallet-connect/nwc/blob/36ab132bbce1/13.md). SAFE-02, SAFE-03, SAFE-04, SAFE-06, SAFE-08 and SAFE-15 have none. The spec appears in `nwc-check list`, in the JSON `spec` field, and under each problem in the text output.
 
 The JSON report records evidence for each check: every request it sent, as `method`, `request` and `reply` event IDs and `ms`, plus the check's total `duration_ms`. Use the event IDs to find the exact events on the relay. Checks built on the shared `get_info` reply cite that exchange. Checks that send nothing, such as DISC-01, have none.
 
@@ -146,3 +146,17 @@ These run last because they use up the connection's budget, so use a connection 
 **SAFE-02** reads the connection's remaining budget with `get_budget`, or from `--budget-sats` for wallets without it. It then sends five payments at once, sized so four fit the budget and five don't, and checks how much the counterparty actually received. The five payments together must fit under `--max-sats`.
 
 **SAFE-08** runs after SAFE-02. With each advertised spending method (`pay_invoice`, `pay_keysend`, `multi_pay_invoice` and `multi_pay_keysend`), it tries to pay the counterparty 1 sat more than the budget has left. Each must be refused with `QUOTA_EXCEEDED`; the check fails if the counterparty receives anything. Other errors, such as `INSUFFICIENT_BALANCE`, don't show whether the budget was checked, so they make the check skip rather than pass. Keysend payments need the LND counterparty to run with `--accept-keysend`.
+
+## Rate limits
+
+| ID | Severity | Level | Check |
+|---|---|---|---|
+| SAFE-15 | MEDIUM | SHOULD | A burst of requests is rate limited and the wallet recovers |
+
+A leaked connection string or a buggy app can flood a wallet with requests. NIP-47 defines `RATE_LIMITED` for this, but doesn't require wallets to use it.
+
+**SAFE-15** only runs with `--with-flood` (or `with_flood = true` in the settings file), since it can trip alerts on hosted wallets. It runs last, on its own, so rate limiting can't affect other checks. It publishes 60 `get_info` requests at once and collects the replies on one relay subscription. It never sends more, so nwc-check doesn't become the attack. Five seconds later it sends one more `get_info`.
+
+- Passes if any request in the burst got `RATE_LIMITED` and the wallet answers again afterwards.
+- Warns if every request was answered, if requests were dropped without `RATE_LIMITED`, or if the wallet stopped answering.
+- Skipped if the relays turned some of the burst away, since the wallet never saw it. Many relays limit events per connection, so this is common on public relays.

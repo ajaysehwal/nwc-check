@@ -2,6 +2,7 @@ mod budget;
 mod discovery;
 mod encryption;
 mod errors;
+mod flood;
 mod invoices;
 mod ledger;
 mod nwc13;
@@ -76,6 +77,7 @@ pub struct Context {
 	pub unknown_method: Result<Reply, WalletError>,
 	pub payments: Result<Payments, String>,
 	pub readonly: Option<Wallet>,
+	pub flood: bool,
 	shared: Vec<Exchange>,
 }
 
@@ -115,6 +117,7 @@ impl Context {
 			unknown_method,
 			payments: Err(NO_COUNTERPARTY.to_owned()),
 			readonly: None,
+			flood: false,
 			shared: evidence.exchanges,
 		})
 	}
@@ -135,6 +138,12 @@ impl Context {
 
 	pub fn with_readonly(mut self, wallet: Wallet) -> Self {
 		self.readonly = Some(wallet);
+		self
+	}
+
+	/// Allows SAFE-15 to send a burst of requests.
+	pub fn with_flood(mut self) -> Self {
+		self.flood = true;
 		self
 	}
 
@@ -209,10 +218,11 @@ pub enum Section {
 	Nwc13,
 	Ledger,
 	Budget,
+	Flood,
 }
 
 impl Section {
-	pub const ALL: [Section; 10] = [
+	pub const ALL: [Section; 11] = [
 		Self::Discovery,
 		Self::Encryption,
 		Self::Responses,
@@ -223,6 +233,7 @@ impl Section {
 		Self::Nwc13,
 		Self::Ledger,
 		Self::Budget,
+		Self::Flood,
 	];
 
 	pub fn title(self) -> &'static str {
@@ -237,6 +248,7 @@ impl Section {
 			Self::Nwc13 => "Connection budget (NWC-13)",
 			Self::Ledger => "Ledger",
 			Self::Budget => "Budget",
+			Self::Flood => "Rate limits",
 		}
 	}
 
@@ -252,6 +264,7 @@ impl Section {
 			Self::Nwc13 => nwc13::CHECKS,
 			Self::Ledger => ledger::CHECKS,
 			Self::Budget => budget::CHECKS,
+			Self::Flood => flood::CHECKS,
 		}
 	}
 
@@ -275,6 +288,7 @@ impl Section {
 			Self::Nwc13 => nwc13::run(ctx).await,
 			Self::Ledger => ledger::run(ctx).await,
 			Self::Budget => budget::run(ctx).await,
+			Self::Flood => flood::run(ctx).await,
 		}
 	}
 }
@@ -284,8 +298,9 @@ pub fn catalog() -> Vec<&'static Check> {
 }
 
 pub async fn run_by_section(ctx: &Context, mut on_section: impl FnMut(Section, Vec<Outcome>)) {
-	// Ledger compares balances and Budget uses up the budget, so each runs on its own at the end.
-	let (together, after) = Section::ALL.split_at(Section::ALL.len() - 2);
+	// Ledger compares balances, Budget uses up the budget and a flood can get later requests
+	// rate limited, so each runs on its own at the end.
+	let (together, after) = Section::ALL.split_at(Section::ALL.len() - 3);
 	let mut pending: FuturesUnordered<_> = together
 		.iter()
 		.enumerate()

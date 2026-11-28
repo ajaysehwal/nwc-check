@@ -37,6 +37,7 @@ nwc-check run
 | `--format <FORMAT>` | `text` (default), `json`, `html` or `junit` |
 | `--timeout <SECS>` | Seconds to wait for each reply (default 10) |
 | `--strict` | Treat warnings as failures |
+| `--with-flood` | Run SAFE-15, which sends a burst of 60 `get_info` requests to test rate limiting |
 | `--no-color` | Disable colored output (`NO_COLOR` is also respected) |
 
 `nwc-check list` prints all checks.
