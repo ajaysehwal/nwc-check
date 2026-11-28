@@ -58,6 +58,10 @@ pub struct RunArgs {
 	#[arg(long)]
 	pub strict: bool,
 
+	/// Run SAFE-15, which sends a burst of 60 get_info requests to test rate limiting
+	#[arg(long)]
+	pub with_flood: bool,
+
 	/// File to write the report to (default nwc-check-report.html for html, stdout otherwise)
 	#[arg(long, short, value_name = "PATH")]
 	pub output: Option<PathBuf>,

@@ -2,7 +2,7 @@ mod support;
 
 use std::time::Duration;
 
-use nostr_sdk::prelude::MockRelay;
+use nostr_sdk::prelude::{LocalRelayBuilder, RateLimit};
 use nwc_check::check::{Outcome, Status};
 use nwc_check::checks::{self, Context, Payments};
 use nwc_check::wallet::Wallet;
@@ -24,6 +24,9 @@ struct Run {
 	broke_counterparty: bool,
 	max_sats: u64,
 	budget_sats: Option<u64>,
+	flood: bool,
+	/// Keep the relay's default limit of 60 events a minute, even for a flood.
+	strict_relay: bool,
 }
 
 impl Default for Run {
@@ -35,13 +38,21 @@ impl Default for Run {
 			broke_counterparty: false,
 			max_sats: 1000,
 			budget_sats: Some(100),
+			flood: false,
+			strict_relay: false,
 		}
 	}
 }
 
 impl Run {
 	async fn checks(self) -> (Vec<Outcome>, MockNetwork) {
-		let relay = MockRelay::run().await.unwrap();
+		let mut builder = LocalRelayBuilder::default();
+		if self.flood && !self.strict_relay {
+			// Real relays limit events per connection too; this one lets the whole burst through.
+			builder = builder.rate_limit(RateLimit { max_reqs: 500, notes_per_minute: 10_000 });
+		}
+		let relay = builder.build();
+		relay.run().await.unwrap();
 		let network = MockNetwork::new(self.chain);
 		let budget_msat = self.budget_sats.map(|sats| sats * 1000);
 		let connections = MockWallet::start(&relay, self.bugs, network.clone(), budget_msat).await;
@@ -51,6 +62,9 @@ impl Run {
 			.await
 			.unwrap()
 			.with_readonly(readonly);
+		if self.flood {
+			ctx = ctx.with_flood();
+		}
 		if self.counterparty {
 			let node = Box::new(MockCounterparty {
 				network: network.clone(),
@@ -209,4 +223,44 @@ async fn each_bug_is_caught_on_its_own() {
 			outcomes.iter().filter(|o| o.is_problem()).collect::<Vec<_>>()
 		);
 	}
+}
+
+async fn flood(bugs: Bugs) -> Outcome {
+	let (outcomes, _) = Run { bugs, flood: true, ..Run::default() }.checks().await;
+	outcomes.into_iter().find(|outcome| outcome.id == "SAFE-15").unwrap()
+}
+
+#[tokio::test]
+async fn flood_is_off_by_default() {
+	let (outcomes, _) = Run::default().checks().await;
+	assert_eq!(status(&outcomes, "SAFE-15"), Status::Skip);
+}
+
+#[tokio::test]
+async fn rate_limited_flood_passes() {
+	let outcome = flood(Bugs::default()).await;
+	assert_eq!(outcome.status, Status::Pass, "{}", outcome.detail);
+	assert_eq!(outcome.evidence.len(), 61);
+}
+
+#[tokio::test]
+async fn flood_without_rate_limit_warns() {
+	let outcome = flood(Bugs { no_rate_limit: true, ..Bugs::default() }).await;
+	assert_eq!(outcome.status, Status::Warn);
+	assert!(outcome.detail.starts_with("all 60 requests were answered"), "{}", outcome.detail);
+}
+
+#[tokio::test]
+async fn wallet_that_stops_answering_after_a_flood_is_reported() {
+	let outcome = flood(Bugs { stalls_after_flood: true, ..Bugs::default() }).await;
+	assert_eq!(outcome.status, Status::Warn);
+	assert!(outcome.detail.starts_with("stopped answering"), "{}", outcome.detail);
+}
+
+#[tokio::test]
+async fn flood_blocked_by_the_relay_is_skipped() {
+	let (outcomes, _) = Run { flood: true, strict_relay: true, ..Run::default() }.checks().await;
+	let outcome = outcomes.into_iter().find(|outcome| outcome.id == "SAFE-15").unwrap();
+	assert_eq!(outcome.status, Status::Skip);
+	assert!(outcome.detail.contains("relays turned away"), "{}", outcome.detail);
 }

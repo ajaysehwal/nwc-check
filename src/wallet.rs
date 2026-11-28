@@ -255,6 +255,65 @@ impl Wallet {
 		}
 	}
 
+	/// Publishes every request at once and collects the replies on one subscription, so a burst
+	/// doesn't open a subscription per request. Results are in the order of `requests`.
+	pub async fn burst(&self, requests: Vec<Request>) -> Vec<Result<Reply, WalletError>> {
+		let started = Instant::now();
+		let signed: Vec<Result<Signed, WalletError>> =
+			requests.into_iter().map(|request| self.sign(request)).collect();
+		let ids: Vec<EventId> = signed.iter().flatten().map(|signed| signed.event.id).collect();
+		let filter =
+			Filter::new().kind(Kind::WalletConnectResponse).author(self.uri.public_key).events(ids);
+		let window = self.timeout * 3;
+		let mut replies = match self
+			.client
+			.stream_events(filter)
+			.timeout(window)
+			.policy(ReqExitPolicy::WaitDurationAfterEOSE(window))
+			.await
+		{
+			Ok(replies) => replies,
+			Err(error) => {
+				let error = relay_error(error).to_string();
+				return signed.iter().map(|_| Err(WalletError::Relay(error.clone()))).collect();
+			}
+		};
+
+		let published = futures::future::join_all(signed.iter().map(|signed| async move {
+			match signed {
+				Ok(signed) => self.publish(signed).await,
+				Err(error) => Err(WalletError::Relay(error.to_string())),
+			}
+		}))
+		.await;
+		let mut results: Vec<Option<Result<Reply, WalletError>>> =
+			published.into_iter().map(|published| published.err().map(Err)).collect();
+
+		let deadline = tokio::time::Instant::now() + self.timeout;
+		while results.iter().any(Option::is_none) {
+			let response = match tokio::time::timeout_at(deadline, replies.next()).await {
+				Ok(Some((_, Ok(response)))) => response,
+				Ok(Some(_)) => continue,
+				Ok(None) | Err(_) => break,
+			};
+			let index = response.tags.event_ids().find_map(|id| {
+				signed.iter().position(|s| s.as_ref().is_ok_and(|s| s.event.id == id))
+			});
+			if let Some(index) = index.filter(|&index| results[index].is_none()) {
+				let Ok(request) = &signed[index] else { continue };
+				results[index] = Some(self.open(request, response));
+			}
+		}
+
+		for (signed, result) in signed.iter().zip(&results) {
+			if let Ok(signed) = signed {
+				let reply = result.as_ref().and_then(|result| result.as_ref().ok());
+				self.record(signed, reply, started);
+			}
+		}
+		results.into_iter().map(|result| result.unwrap_or(Err(WalletError::NoReply))).collect()
+	}
+
 	fn is_untagged_reply(&self, signed: &Signed, response: Event) -> bool {
 		response.tags.event_ids().next().is_none()
 			&& self

@@ -88,6 +88,9 @@ async fn run(args: RunArgs) -> Result<ExitCode> {
 	if let Some(readonly) = readonly {
 		ctx = ctx.with_readonly(readonly);
 	}
+	if settings.with_flood {
+		ctx = ctx.with_flood();
+	}
 	if let Some(lnd) = &settings.lnd {
 		ctx = if settings.allow_spend {
 			ui.busy("Connecting to the counterparty node");

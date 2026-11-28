@@ -1,6 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow, bail};
 use futures::FutureExt;
@@ -14,7 +15,7 @@ use nostr::nips::nip47::NostrWalletConnectUri;
 use nostr::nips::{nip04, nip44};
 use nostr_sdk::prelude::{
 	Client, ClientNotification, Event, EventBuilder, EventId, Filter, FinalizeEvent, Keys, Kind,
-	MockRelay, RelayMessage, StreamExt, Tag, Timestamp,
+	LocalRelay, RelayMessage, StreamExt, Tag, Timestamp,
 };
 use nwc_check::counterparty::{
 	Counterparty, Invoice, NodeInfo, PayError, from_hex, sha256, to_hex,
@@ -64,6 +65,8 @@ pub struct Bugs {
 	pub budget_only_on_pay_invoice: bool,
 	pub pays_stale: bool,
 	pub ignores_expiry: bool,
+	pub no_rate_limit: bool,
+	pub stalls_after_flood: bool,
 }
 
 impl Bugs {
@@ -94,6 +97,8 @@ impl Bugs {
 			budget_only_on_pay_invoice: true,
 			pays_stale: true,
 			ignores_expiry: true,
+			no_rate_limit: true,
+			stalls_after_flood: true,
 			..Self::default()
 		}
 	}
@@ -269,6 +274,8 @@ pub struct MockWallet {
 	paid: Mutex<Vec<[u8; 32]>>,
 	budget: Option<Mutex<Budget>>,
 	balance_msat: Mutex<u64>,
+	recent: Mutex<VecDeque<Instant>>,
+	stalled: AtomicBool,
 }
 
 struct Budget {
@@ -284,7 +291,7 @@ impl Budget {
 
 impl MockWallet {
 	pub async fn start(
-		relay: &MockRelay,
+		relay: &LocalRelay,
 		bugs: Bugs,
 		network: MockNetwork,
 		budget_msat: Option<u64>,
@@ -305,6 +312,8 @@ impl MockWallet {
 			paid: Mutex::default(),
 			budget: budget_msat.map(|total_msat| Mutex::new(Budget { total_msat, used_msat: 0 })),
 			balance_msat: Mutex::new(100_000_000),
+			recent: Mutex::default(),
+			stalled: AtomicBool::new(false),
 		};
 		let info = EventBuilder::new(Kind::WalletConnectInfo, METHODS.join(" "))
 			.tag(Tag::parse(["encryption", "nip44_v2 nip04"]).unwrap())
@@ -344,6 +353,15 @@ impl MockWallet {
 		connections
 	}
 
+	/// Whether get_info has been asked more than 20 times in the last 3 seconds.
+	fn flooded(&self) -> bool {
+		let now = Instant::now();
+		let mut recent = self.recent.lock().unwrap();
+		recent.retain(|at| now.duration_since(*at) < Duration::from_secs(3));
+		recent.push_back(now);
+		recent.len() > 20
+	}
+
 	async fn handle(&self, request: &Event) {
 		let expired = request.tags.expiration().is_some_and(|at| at < Timestamp::now());
 		if expired && !self.bugs.answer_expired {
@@ -381,6 +399,19 @@ impl MockWallet {
 		};
 		let body: Value = serde_json::from_str(&plaintext).unwrap();
 		let method = body["method"].as_str().unwrap_or_default().to_owned();
+
+		if self.stalled.load(Ordering::SeqCst) {
+			return;
+		}
+		if method == "get_info" && self.flooded() {
+			if self.bugs.stalls_after_flood {
+				self.stalled.store(true, Ordering::SeqCst);
+				return;
+			}
+			if !self.bugs.no_rate_limit {
+				return self.reply(request, nip44, &method, error("RATE_LIMITED")).await;
+			}
+		}
 
 		let outcome = match method.as_str() {
 			"pay_invoice" if readonly && !self.bugs.ignores_permissions => error("RESTRICTED"),

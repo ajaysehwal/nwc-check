@@ -16,6 +16,7 @@ pub struct Config {
 	pub network: Option<Network>,
 	pub only: Option<Vec<String>>,
 	pub strict: Option<bool>,
+	pub with_flood: Option<bool>,
 	pub lnd: LndConfig,
 	pub spending: SpendingConfig,
 }
@@ -72,6 +73,7 @@ pub struct Settings {
 	pub network: Option<Network>,
 	pub only: Vec<String>,
 	pub strict: bool,
+	pub with_flood: bool,
 	pub lnd: Option<LndSettings>,
 	pub allow_spend: bool,
 	pub amount_sats: u64,
@@ -106,6 +108,7 @@ impl Settings {
 			network: args.network.or(config.network),
 			only,
 			strict: args.strict || config.strict.unwrap_or(false),
+			with_flood: args.with_flood || config.with_flood.unwrap_or(false),
 			lnd,
 			allow_spend: cli.allow_spend || config.spending.allow.unwrap_or(false),
 			amount_sats: cli.amount.or(config.spending.amount).unwrap_or(10),
@@ -152,6 +155,10 @@ timeout = 10
 
 # Treat warnings as failures
 strict = false
+
+# Run SAFE-15, which sends a burst of 60 get_info requests to test rate
+# limiting. Off by default, since it can trip alerts on hosted wallets.
+with_flood = false
 
 # Counterparty node for payment checks. Paths can be relative to this file
 # or start with ~/.
